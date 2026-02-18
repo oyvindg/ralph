@@ -65,63 +65,179 @@ Or stay in current directory and target another repo explicitly:
 
 ## Example Prompts
 
-**Bug fix with verification:**
+**Software development:**
 
 ```bash
-./ralph.sh -i 3 -p "Fix the failing test in tests/auth.test.js. Each iteration: identify root cause, apply fix, run tests, verify fix doesn't break other tests."
+# Fix a failing test with iterative debugging
+./ralph.sh -i 3 -p "
+Fix the failing test in tests/auth.test.js.
+Each iteration:
+- Identify root cause
+- Apply fix
+- Run tests
+- Verify fix doesn't break other tests
+"
+
+# Gradually refactor a class over multiple iterations
+./ralph.sh -i 5 -p "
+Refactor the UserService class to use dependency injection.
+Each iteration:
+- Extract one dependency
+- Update tests
+- Ensure all tests pass before proceeding
+"
+
+# Security audit with fixes documented
+./ralph.sh -i 4 -p "
+Review src/api/ for security issues.
+Each iteration:
+- Identify one vulnerability
+- Apply fix
+- Document the change
+Focus on input validation and SQL injection.
+"
+
+# Profile and optimize slow queries incrementally
+./ralph.sh -i 3 -p "
+Optimize database queries in src/db/queries.js.
+Each iteration:
+- Profile slowest query
+- Optimize it
+- Measure improvement
+Stop when queries are under 100ms.
+"
 ```
 
-**Incremental refactoring:**
+**Trading strategy development:**
 
 ```bash
-./ralph.sh -i 5 -p "Refactor the UserService class to use dependency injection. Each iteration: extract one dependency, update tests, ensure all tests pass before proceeding."
-```
+# Backtest optimization
+./ralph.sh -i 5 -p "
+Optimize the momentum strategy in strategy.py.
+Each iteration:
+- Adjust one parameter (lookback, threshold, position size)
+- Run backtest
+- Compare Sharpe ratio
+Document changes in optimization-log.md.
+"
 
-**Code review and cleanup:**
+# Risk management review
+./ralph.sh -i 3 -p "
+Review risk controls in risk_manager.py.
+Each iteration:
+- Identify one edge case (gap risk, liquidity, correlation spike)
+- Add protection
+- Verify with stress test scenarios
+"
 
-```bash
-./ralph.sh -i 4 -p "Review src/api/ for security issues. Each iteration: identify one vulnerability, apply fix, document the change. Focus on input validation and SQL injection."
-```
+# Signal refinement
+./ralph.sh -i 4 -p "
+Improve entry signals in signals.py.
+Each iteration:
+- Analyze false positive rate
+- Add one filter (volume, volatility, trend)
+- Measure improvement in win rate
+"
 
-**Performance optimization:**
-
-```bash
-./ralph.sh -i 3 -p "Optimize database queries in src/db/queries.js. Each iteration: profile slowest query, optimize it, measure improvement. Stop when queries are under 100ms."
+# Portfolio rebalancing
+./ralph.sh -i 3 -p "
+Refactor rebalance.py for better execution.
+Each iteration:
+- Reduce slippage impact
+- Improve order sizing
+- Add transaction cost awareness
+Target: reduce turnover by 20%.
+"
 ```
 
 **Business and strategy:**
 
 ```bash
 # Budget optimization
-./ralph.sh -i 4 -p "Review Q2 budget in budget.csv. Each iteration: identify largest cost category, find 10% savings potential, document trade-offs in budget-review.md."
+./ralph.sh -i 4 -p "
+Review Q2 budget in budget.csv.
+Each iteration:
+- Identify largest cost category
+- Find 10% savings potential
+- Document trade-offs in budget-review.md
+"
 
 # Sales pitch improvement
-./ralph.sh -i 3 -p "Improve sales pitch in pitch.md. Each iteration: strengthen one weak point (value prop, objection handling, call-to-action), make it more concrete with numbers."
+./ralph.sh -i 3 -p "
+Improve sales pitch in pitch.md.
+Each iteration:
+- Strengthen one weak point (value prop, objection handling, call-to-action)
+- Make it more concrete with numbers
+"
 
 # Competitive analysis
-./ralph.sh -i 5 -p "Analyze competitors in our market. Each iteration: research one competitor (pricing, features, positioning), add comparison to competitive-analysis.md."
+./ralph.sh -i 5 -p "
+Analyze competitors in our market.
+Each iteration:
+- Research one competitor (pricing, features, positioning)
+- Add comparison to competitive-analysis.md
+"
 
 # OKR refinement
-./ralph.sh -i 3 -p "Refine Q3 OKRs in okrs.md. Each iteration: check one objective for measurability, tighten key results, ensure alignment with company goals."
+./ralph.sh -i 3 -p "
+Refine Q3 OKRs in okrs.md.
+Each iteration:
+- Check one objective for measurability
+- Tighten key results
+- Ensure alignment with company goals
+"
 
 # Process improvement
-./ralph.sh -i 4 -p "Optimize customer onboarding flow. Each iteration: identify one bottleneck, propose fix, estimate impact on conversion rate. Document in onboarding-improvements.md."
+./ralph.sh -i 4 -p "
+Optimize customer onboarding flow.
+Each iteration:
+- Identify one bottleneck
+- Propose fix
+- Estimate impact on conversion rate
+Document in onboarding-improvements.md.
+"
 ```
 
 **Everyday tasks (non-code):**
 
 ```bash
 # Improve a job application
-./ralph.sh -i 3 -p "Improve my CV in resume.md. Each iteration: identify weakest section, rewrite for clarity and impact, check for typos."
+./ralph.sh -i 3 -p "
+Improve my CV in resume.md.
+Each iteration:
+- Identify weakest section
+- Rewrite for clarity and impact
+- Check for typos
+"
 
 # Research and summarize
-./ralph.sh -i 4 -p "Research best practices for home office ergonomics. Each iteration: find one key area (desk, chair, lighting, breaks), summarize recommendations, add to notes.md."
+./ralph.sh -i 4 -p "
+Research best practices for home office ergonomics.
+Each iteration:
+- Find one key area (desk, chair, lighting, breaks)
+- Summarize recommendations
+- Add to notes.md
+"
 
 # Plan a trip
-./ralph.sh -i 3 -p "Plan a weekend trip to Bergen. Each iteration: research one aspect (transport, accommodation, activities), add details to trip-plan.md with costs."
+./ralph.sh -i 3 -p "
+Plan a weekend trip to Bergen.
+Each iteration:
+- Research one aspect (transport, accommodation, activities)
+- Add details to trip-plan.md with costs
+"
 
 # Learn a new topic
-./ralph.sh -i 5 -p "Explain how solar panels work. Each iteration: go one level deeper (basic concept → physics → efficiency factors → installation → economics). Write to solar-notes.md."
+./ralph.sh -i 5 -p "
+Explain how solar panels work.
+Each iteration go one level deeper:
+1. Basic concept
+2. Physics
+3. Efficiency factors
+4. Installation
+5. Economics
+Write to solar-notes.md.
+"
 ```
 
 ## How `ralph.sh` Works
@@ -150,20 +266,21 @@ Pass it as plan input to include those preferences in each iteration:
 
 ## Arguments
 
-| Argument | Short | Required | Description | Example |
-|---|---|---|---|---|
-| `--iterations N` | `-i N` | Yes | Positive integer for number of iterations. | `--iterations 5` |
-| `--prompt "..."` | `-p "..."` | Yes | Objective passed into each iteration. | `-p "Improve test reliability"` |
-| `--plan FILE` | `-P FILE` | No | Optional guidance file. If missing/unreadable, Ralph continues with a warning. | `-P ~/.codex/AGENTS.md` |
-| `--workspace PATH` | `-w PATH` | No | Workspace directory. If omitted, defaults to caller directory (`$PWD`). If provided, path must exist and be a directory. | `-w ~/myrepo` |
-| `--model NAME` | `-m NAME` | No | Codex model name (if omitted, Codex CLI default model is used). | `-m gpt-5.3-codex` |
-| `--timeout SEC` | `-t SEC` | No | Timeout in seconds for each iteration command (`0` disables timeout). | `-t 900` |
-| `--no-colors` | - | No | Disable ANSI colors in terminal output. | `--no-colors` |
-| `--skip-git-repo-check` | - | No | Allow running in non-git directories (passed to Codex). | `--skip-git-repo-check` |
-| `--docker` | - | No | Run in Docker container (auto-builds image if needed). | `--docker` |
-| `--docker-build` | - | No | Build Docker image only, then exit. | `--docker-build` |
-| `--docker-rebuild` | - | No | Force rebuild Docker image and run. | `--docker-rebuild` |
-| `--dry-run` | `-d` | No | Print/record commands without running Codex. | `--dry-run` |
+| Argument&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | Short&nbsp;&nbsp;&nbsp; | Required | Description | Example&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; |
+|:---|:---|:---:|---|:---|
+| `--iterations` | `-i` | Yes | Number of iterations (positive integer) | `-i 5` |
+| `--prompt` | `-p` | Yes | Objective passed into each iteration | `-p "Fix bug"` |
+| `--plan` | `-P` | No | Guidance file (continues with warning if missing) | `-P AGENTS.md` |
+| `--workspace` | `-w` | No | Workspace directory (default: current dir) | `-w ~/myrepo` |
+| `--model` | `-m` | No | Codex model name | `-m gpt-5.3-codex` |
+| `--timeout` | `-t` | No | Timeout per iteration in seconds (0=disabled) | `-t 900` |
+| `--no-colors` | | No | Disable ANSI colors in output | |
+| `--skip-git-repo-check` | | No | Allow running in non-git directories | |
+| `--docker` | | No | Run in Docker container | |
+| `--docker-build` | | No | Build Docker image only | |
+| `--docker-rebuild` | | No | Force rebuild Docker image and run | |
+| `--dry-run` | `-d` | No | Print commands without executing | `-d` |
+| `--help` | `-h` | No | Show usage information and exit | `-h` |
 
 ## Session Artifacts
 
