@@ -4,17 +4,63 @@
 
 The loop itself is tool-agnostic in concept: repeat a goal over multiple iterations, feed previous output back in, and improve step by step.
 
-This repository's implementation is currently wired to OpenAI Codex CLI.
+This repository's implementation supports multiple AI engines and uses a hook-based architecture for customization.
 
 ## Requirements
 
 - Bash
-- `codex` CLI installed and available in `PATH`
-- Authenticated Codex CLI session
-- OpenAI account with active billing/access for Codex usage
+- At least one AI engine available (see [AI Engines](#ai-engines))
+- `jq` for JSON processing
 
-If `codex` is missing, `ralph.sh` prints an install/setup link:
-`https://developers.openai.com/codex/cli/`
+## Install in a Specific Repo
+
+### Option 1: Use Ralph directly from GitHub repo clone
+
+```bash
+git clone https://github.com/oyvindg/ralph ~/.ralph-tool
+chmod +x ~/.ralph-tool/ralph.sh
+
+cd ~/myrepo
+~/.ralph-tool/ralph.sh -g "Refactor module safely" -s 3
+```
+
+### Option 2: Download `ralph.sh` directly into the target repo
+
+```bash
+cd ~/myrepo
+mkdir -p .tools/ralph
+curl -fsSL https://raw.githubusercontent.com/oyvindg/ralph/main/ralph.sh -o .tools/ralph/ralph.sh
+chmod +x .tools/ralph/ralph.sh
+
+.tools/ralph/ralph.sh -g "Improve test reliability" -s 3
+```
+
+If you keep project-specific `.ralph/` config in the target repo, Ralph will use that automatically.
+
+## AI Engines
+
+Ralph auto-detects available AI engines. List them with:
+
+```bash
+./ralph.sh --list-engines
+```
+
+| Engine | Detection | Setup |
+|--------|-----------|-------|
+| `codex` | `codex` CLI in PATH | [OpenAI Codex CLI](https://developers.openai.com/codex/cli/) |
+| `claude` | `claude` CLI in PATH | [Claude Code CLI](https://claude.ai/claude-code) |
+| `ollama` | `ollama` running locally | [Ollama](https://ollama.ai/) |
+| `openai` | `OPENAI_API_KEY` set | OpenAI API key |
+| `anthropic` | `ANTHROPIC_API_KEY` set | Anthropic API key |
+| `mock` | Always available | Built-in for testing |
+
+Override engine selection:
+
+```bash
+./ralph.sh -g "Improve X" --engine claude           # Uses plan steps
+./ralph.sh -g "Improve X" --engine claude -s 3      # Limit to 3 steps
+./ralph.sh -g "Improve X" --engine ollama -m deepseek-coder
+```
 
 ## Make Executable
 
@@ -29,38 +75,44 @@ Then run it directly (`./ralph.sh ...`) or via Bash (`bash ./ralph.sh ...`).
 ## Usage
 
 ```bash
-./ralph.sh --iterations 5 --prompt "Improve X with measurable outcomes"
+./ralph.sh --goal "Improve X with measurable outcomes"
+```
+
+With step limit:
+
+```bash
+./ralph.sh --goal "Improve X" --steps 3
 ```
 
 Dry run:
 
 ```bash
-./ralph.sh --iterations 2 --prompt "Test run" --dry-run
+./ralph.sh --goal "Test run" --dry-run
 ```
 
 With plan file and model:
 
 ```bash
-./ralph.sh -i 3 -p "Refactor module safely" -P AGENTS.md -m gpt-5.3-codex
+./ralph.sh -g "Refactor module safely" -G AGENTS.md -m gpt-5.3-codex
 ```
 
 Run against a specific workspace (optional):
 
 ```bash
-./ralph.sh -i 3 -p "Tune strategy preset" -w ~/myrepo -P ~/.codex/AGENTS.md
+./ralph.sh -i 3 -g "Tune strategy preset" -w ~/myrepo -G ~/.codex/AGENTS.md
 ```
 
 Call Ralph from another repository:
 
 ```bash
 cd ~/myrepo
-~/ralph.sh -i 5 -p "Improve fitness_score with minimal risk" -P ~/.codex/AGENTS.md
+~/ralph.sh -i 5 -g "Improve fitness_score with minimal risk" -G ~/.codex/AGENTS.md
 ```
 
 Or stay in current directory and target another repo explicitly:
 
 ```bash
-~/ralph.sh -i 5 -p "Improve fitness_score with minimal risk" -w ~/myrepo -P ~/.codex/AGENTS.md
+~/ralph.sh -i 5 -g "Improve fitness_score with minimal risk" -w ~/myrepo -G ~/.codex/AGENTS.md
 ```
 
 ## Example Prompts
@@ -69,7 +121,7 @@ Or stay in current directory and target another repo explicitly:
 
 ```bash
 # Fix a failing test with iterative debugging
-./ralph.sh -i 3 -p "
+./ralph.sh -i 3 -g "
 Fix the failing test in tests/auth.test.js.
 Each iteration:
 - Identify root cause
@@ -79,7 +131,7 @@ Each iteration:
 "
 
 # Gradually refactor a class over multiple iterations
-./ralph.sh -i 5 -p "
+./ralph.sh -i 5 -g "
 Refactor the UserService class to use dependency injection.
 Each iteration:
 - Extract one dependency
@@ -88,7 +140,7 @@ Each iteration:
 "
 
 # Security audit with fixes documented
-./ralph.sh -i 4 -p "
+./ralph.sh -i 4 -g "
 Review src/api/ for security issues.
 Each iteration:
 - Identify one vulnerability
@@ -98,7 +150,7 @@ Focus on input validation and SQL injection.
 "
 
 # Profile and optimize slow queries incrementally
-./ralph.sh -i 3 -p "
+./ralph.sh -i 3 -g "
 Optimize database queries in src/db/queries.js.
 Each iteration:
 - Profile slowest query
@@ -112,7 +164,7 @@ Stop when queries are under 100ms.
 
 ```bash
 # Backtest optimization
-./ralph.sh -i 5 -p "
+./ralph.sh -i 5 -g "
 Optimize the momentum strategy in strategy.py.
 Each iteration:
 - Adjust one parameter (lookback, threshold, position size)
@@ -122,7 +174,7 @@ Document changes in optimization-log.md.
 "
 
 # Risk management review
-./ralph.sh -i 3 -p "
+./ralph.sh -i 3 -g "
 Review risk controls in risk_manager.py.
 Each iteration:
 - Identify one edge case (gap risk, liquidity, correlation spike)
@@ -131,7 +183,7 @@ Each iteration:
 "
 
 # Signal refinement
-./ralph.sh -i 4 -p "
+./ralph.sh -i 4 -g "
 Improve entry signals in signals.py.
 Each iteration:
 - Analyze false positive rate
@@ -140,7 +192,7 @@ Each iteration:
 "
 
 # Portfolio rebalancing
-./ralph.sh -i 3 -p "
+./ralph.sh -i 3 -g "
 Refactor rebalance.py for better execution.
 Each iteration:
 - Reduce slippage impact
@@ -154,7 +206,7 @@ Target: reduce turnover by 20%.
 
 ```bash
 # Budget optimization
-./ralph.sh -i 4 -p "
+./ralph.sh -i 4 -g "
 Review Q2 budget in budget.csv.
 Each iteration:
 - Identify largest cost category
@@ -163,7 +215,7 @@ Each iteration:
 "
 
 # Sales pitch improvement
-./ralph.sh -i 3 -p "
+./ralph.sh -i 3 -g "
 Improve sales pitch in pitch.md.
 Each iteration:
 - Strengthen one weak point (value prop, objection handling, call-to-action)
@@ -171,7 +223,7 @@ Each iteration:
 "
 
 # Competitive analysis
-./ralph.sh -i 5 -p "
+./ralph.sh -i 5 -g "
 Analyze competitors in our market.
 Each iteration:
 - Research one competitor (pricing, features, positioning)
@@ -179,7 +231,7 @@ Each iteration:
 "
 
 # OKR refinement
-./ralph.sh -i 3 -p "
+./ralph.sh -i 3 -g "
 Refine Q3 OKRs in okrs.md.
 Each iteration:
 - Check one objective for measurability
@@ -188,7 +240,7 @@ Each iteration:
 "
 
 # Process improvement
-./ralph.sh -i 4 -p "
+./ralph.sh -i 4 -g "
 Optimize customer onboarding flow.
 Each iteration:
 - Identify one bottleneck
@@ -202,7 +254,7 @@ Document in onboarding-improvements.md.
 
 ```bash
 # Improve a job application
-./ralph.sh -i 3 -p "
+./ralph.sh -i 3 -g "
 Improve my CV in resume.md.
 Each iteration:
 - Identify weakest section
@@ -211,7 +263,7 @@ Each iteration:
 "
 
 # Research and summarize
-./ralph.sh -i 4 -p "
+./ralph.sh -i 4 -g "
 Research best practices for home office ergonomics.
 Each iteration:
 - Find one key area (desk, chair, lighting, breaks)
@@ -220,7 +272,7 @@ Each iteration:
 "
 
 # Plan a trip
-./ralph.sh -i 3 -p "
+./ralph.sh -i 3 -g "
 Plan a weekend trip to Bergen.
 Each iteration:
 - Research one aspect (transport, accommodation, activities)
@@ -228,7 +280,7 @@ Each iteration:
 "
 
 # Learn a new topic
-./ralph.sh -i 5 -p "
+./ralph.sh -i 5 -g "
 Explain how solar panels work.
 Each iteration go one level deeper:
 1. Basic concept
@@ -242,57 +294,297 @@ Write to solar-notes.md.
 
 ## How `ralph.sh` Works
 
-For each iteration, Ralph:
+Ralph follows a deterministic state machine with hooks as the policy layer:
 
-1. Builds a prompt file containing:
-   - your objective (`--prompt`)
-   - optional plan content (`--plan`)
-   - previous iteration output (`last_response.md`)
-2. Runs Codex CLI (`codex exec`) in the selected workspace.
-3. Captures the latest model response into `last_response.md`.
-4. Appends iteration stats and response content to `summary.md`.
+```
+Session Start
+    │
+    ├─→ before-session.sh (planning)
+    │
+    └─→ For each step:
+            │
+            ├─→ Build prompt (objective + plan + last response)
+            ├─→ ai.sh (execute AI engine)
+            ├─→ quality-gate.sh → testing.sh
+            │       │
+            │       ├─→ exit 0: continue
+            │       ├─→ exit 1: stop session
+            │       ├─→ exit 2: replan
+            │       └─→ exit 3: retry step
+            │
+            └─→ after-step.sh (logging)
+    │
+    └─→ after-session.sh (cleanup)
+```
 
-At the end, Ralph prints session paths and leaves all artifacts under `sessions/`.
+At the end, Ralph prints session paths and leaves all artifacts under `.ralph/sessions/`.
+
+## Configuration
+
+Ralph uses a `.ralph/` directory for configuration:
+
+```
+.ralph/
+├── profile.toml      # Default settings
+├── lib/              # Shared helpers (UI, logging, source-control, issues adapters)
+├── hooks/            # Lifecycle hooks
+│   ├── ai.sh         # AI engine dispatcher
+│   ├── before-session.sh
+│   ├── issues.sh     # Optional issue/ticket context adapter
+│   ├── after-session.sh
+│   ├── quality-gate.sh
+│   ├── testing.sh
+│   ├── after-step.sh
+│   └── version-control.sh
+├── plans/            # Reusable plan templates
+│   └── refactor.md
+└── sessions/         # Session artifacts (gitignored)
+```
+
+Settings resolution: project `.ralph/` overrides global `~/.ralph/`.
+
+### profile.toml
+
+```toml
+[defaults]
+# steps = 0 means no limit (run all pending steps)
+# steps > 0 limits how many steps per session
+steps = 0
+engine = "codex"
+model = "gpt-5.3-codex"
+timeout = 0
+skip_git_check = false
+ticket = ""
+
+# source-control policy (agnostic)
+source_control_enabled = true
+# auto | git | filesystem
+source_control_backend = "auto"
+source_control_allow_commits = false
+source_control_branch_per_session = false
+source_control_branch_name_template = "ralph/{ticket}/{goal_slug}/{session_id}"
+source_control_require_ticket_for_branch = false
+
+# issue provider (agnostic)
+# none | git | jira
+issues_provider = "none"
+
+# filesystem rollback checkpoints (stored per session)
+checkpoint_enabled = true
+checkpoint_per_step = true
+
+human_guard = true
+human_guard_assume_yes = false
+# session | step | both
+human_guard_scope = "both"
+
+# optional per-step agent routing
+agent_routes = [
+  "test|claude|claude-sonnet-4-20250514",
+  "validate|claude|claude-sonnet-4-20250514",
+  "default|codex|gpt-5.3-codex"
+]
+
+[hooks]
+disabled = []
+```
+
+## Hooks
+
+Hooks are shell scripts that run at lifecycle events. They receive context via environment variables and communicate via exit codes.
+
+| Hook | When | Purpose |
+|------|------|---------|
+| `before-session.sh` | Session start | Setup, planning |
+| `before-step.sh` | Before each step | Step preparation |
+| `quality-gate.sh` | After AI response | Validation, testing |
+| `testing.sh` | Called by quality-gate | Run project tests |
+| `after-step.sh` | After quality-gate passes | Logging, metrics |
+| `version-control.sh` | Called by after-step | Git/file-based step change log generation |
+| `issues.sh` | Called by before-session | Optional ticket/work-item context enrichment (provider adapter) |
+| `after-session.sh` | Session end | Cleanup, summary |
+| `on-error.sh` | On failure | Error handling |
+| `ai.sh` | AI execution | Engine abstraction |
+
+### Exit Codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Success, continue |
+| 1 | Hard failure, stop session |
+| 2 | Replan required |
+| 3 | Retry current step |
+
+### Environment Variables
+
+Hooks receive:
+
+```bash
+RALPH_SESSION_ID      # Unique session identifier
+RALPH_SESSION_DIR     # Session artifacts directory
+RALPH_WORKSPACE       # Working directory
+RALPH_STEP            # Current step number
+RALPH_STEPS           # Total steps
+RALPH_PROMPT_FILE     # Path to prompt file
+RALPH_RESPONSE_FILE   # Path to response file
+RALPH_DRY_RUN         # "1" if dry-run mode
+RALPH_ENGINE          # Selected AI engine
+RALPH_MODEL           # Model name (if specified)
+RALPH_GOAL            # Session goal text
+RALPH_TICKET          # Optional work-item/ticket id (from --ticket/profile)
+RALPH_ISSUES_PROVIDER # none | git | jira
+RALPH_SOURCE_CONTROL_ENABLED
+RALPH_SOURCE_CONTROL_BACKEND
+RALPH_SOURCE_CONTROL_ALLOW_COMMITS
+RALPH_SOURCE_CONTROL_BRANCH_PER_SESSION
+RALPH_SOURCE_CONTROL_BRANCH_NAME_TEMPLATE
+RALPH_SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH
+RALPH_CHECKPOINT_ENABLED
+RALPH_CHECKPOINT_PER_STEP
+RALPH_HUMAN_GUARD     # "1" enables human approval guard
+RALPH_HUMAN_GUARD_ASSUME_YES  # "1" auto-approves guard prompts
+RALPH_HUMAN_GUARD_SCOPE  # session | step | both
+```
+
+## Dry-Run Mode
+
+Dry-run executes the full workflow with a mock AI engine:
+
+```bash
+./ralph.sh -g "Test workflow" -d
+./ralph.sh -g "Test workflow" -s 3 -d    # Limit to 3 steps
+```
+
+- All hooks execute normally
+- Sessions are created with full logging
+- Mock responses simulate AI output
+- No actual AI API calls
+
+### Isolated Dry-Run Examples
+
+Use the repo's `examples/dry-run/` folder for test plans/guides so you do not mix test data with user plans in `.ralph/plans/`.
+Plan files are stateful (`status` gets updated), so copy them to a temporary path before each run if you want to preserve the originals.
+
+```bash
+# Refactor scenario
+cp examples/dry-run/plans/refactor-safe.json /tmp/refactor-safe.plan.json
+./ralph.sh -g "Dry-run refactor test" \
+  -p /tmp/refactor-safe.plan.json \
+  -G examples/dry-run/guides/refactor-guardrails.md \
+  -s 2 -d --human-guard 1 --human-guard-assume-yes 1
+
+# Bugfix scenario
+cp examples/dry-run/plans/bugfix-triage.json /tmp/bugfix-triage.plan.json
+./ralph.sh -g "Dry-run bugfix test" \
+  -p /tmp/bugfix-triage.plan.json \
+  -G examples/dry-run/guides/bugfix-playbook.md \
+  -s 2 -d --human-guard 1 --human-guard-assume-yes 1
+
+# Docs scenario
+cp examples/dry-run/plans/docs-cleanup.json /tmp/docs-cleanup.plan.json
+./ralph.sh -g "Dry-run docs test" \
+  -p /tmp/docs-cleanup.plan.json \
+  -G examples/dry-run/guides/docs-style.md \
+  -s 2 -d --human-guard 1 --human-guard-assume-yes 1
+```
+
+Run all bundled dry examples:
+
+```bash
+./dev/run-dry-examples.sh
+```
+
+### Self-Improvement Example (Ralph on Ralph)
+
+Use this repository as a practical test case for iterative improvement:
+
+```bash
+# Dry-run first (safe)
+cp examples/self-improve/plan.json /tmp/ralph-self-improve.plan.json
+./ralph.sh -g "Improve ralph incrementally" \
+  -p /tmp/ralph-self-improve.plan.json \
+  -G examples/self-improve/guide.md \
+  -s 2 -d --human-guard 1
+
+# Real run
+cp examples/self-improve/plan.json /tmp/ralph-self-improve.plan.json
+./ralph.sh -g "Improve ralph incrementally" \
+  -p /tmp/ralph-self-improve.plan.json \
+  -G examples/self-improve/guide.md \
+  -s 2 --human-guard 1
+```
+
+### Failure Simulation
+
+Test error handling with mock failures:
+
+```bash
+# Force AI failure
+RALPH_MOCK_FAIL=1 ./ralph.sh -g "Test" -d
+
+# Random AI failure (30% chance)
+RALPH_MOCK_FAIL_RATE=30 ./ralph.sh -g "Test" -s 5 -d
+
+# Empty AI response
+RALPH_MOCK_EMPTY=1 ./ralph.sh -g "Test" -d
+
+# AI response with error markers
+RALPH_MOCK_ERROR=1 ./ralph.sh -g "Test" -d
+
+# Force test failure
+RALPH_MOCK_FAIL_TEST=1 ./ralph.sh -g "Test" -d
+
+# Random test failure (20% chance)
+RALPH_MOCK_FAIL_TEST_RATE=20 ./ralph.sh -g "Test" -s 5 -d
+```
 
 ## AGENTS.md
 
 You can keep reusable instructions in an `AGENTS.md` file (for example repo-local `./AGENTS.md` or global `~/.codex/AGENTS.md`).
 
-Pass it as plan input to include those preferences in each iteration:
+Pass it as guide input to include those preferences in each iteration:
 
 ```bash
-./ralph.sh -i 3 -p "Improve test reliability" -P AGENTS.md
+./ralph.sh -i 3 -g "Improve test reliability" -G AGENTS.md
 ```
 
 ## Arguments
 
 | Argument&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; | Short&nbsp;&nbsp;&nbsp; | Required | Description | Example&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; |
 |:---|:---|:---:|---|:---|
-| `--iterations` | `-i` | Yes | Number of iterations (positive integer) | `-i 5` |
-| `--prompt` | `-p` | Yes | Objective passed into each iteration | `-p "Fix bug"` |
-| `--plan` | `-P` | No | Guidance file (continues with warning if missing) | `-P AGENTS.md` |
+| `--goal` | `-g` | Yes | The overall goal for this session | `-g "Fix bug"` |
+| `--steps` | `-s` | No | Max steps to run (0=all pending, default from profile) | `-s 3` |
+| `--plan` | `-p` | No | Execution plan JSON file name/path (default: `plan.json` under `.ralph/plans/`) | `-p sprint-plan.json` |
+| `--guide` | `-G` | No | Optional guidance file (continues with warning if missing) | `-G AGENTS.md` |
 | `--workspace` | `-w` | No | Workspace directory (default: current dir) | `-w ~/myrepo` |
-| `--model` | `-m` | No | Codex model name | `-m gpt-5.3-codex` |
-| `--timeout` | `-t` | No | Timeout per iteration in seconds (0=disabled) | `-t 900` |
+| `--model` | `-m` | No | Model name for the AI engine | `-m gpt-5.3-codex` |
+| `--engine` | `-e` | No | AI engine to use (auto-detected if not set) | `-e claude` |
+| `--ticket` | `-T` | No | Optional work-item/ticket id for branching/commit context | `-T ABC-123` |
+| `--list-engines` | | No | List available AI engines and exit | |
+| `--timeout` | `-t` | No | Timeout per step in seconds (0=disabled) | `-t 900` |
 | `--no-colors` | | No | Disable ANSI colors in output | |
+| `--human-guard` | | No | Enable/disable human approval guard (overrides profile/env) | `--human-guard 1` |
+| `--human-guard-assume-yes` | | No | Auto-approve human guard prompts (for CI) | `--human-guard-assume-yes 1` |
+| `--human-guard-scope` | | No | Where to enforce guard: `session`, `step`, or `both` | `--human-guard-scope step` |
 | `--skip-git-repo-check` | | No | Allow running in non-git directories | |
 | `--docker` | | No | Run in Docker container | |
 | `--docker-build` | | No | Build Docker image only | |
 | `--docker-rebuild` | | No | Force rebuild Docker image and run | |
-| `--dry-run` | `-d` | No | Print commands without executing | `-d` |
+| `--dry-run` | `-d` | No | Run full workflow with mock AI (no API calls) | `-d` |
 | `--help` | `-h` | No | Show usage information and exit | `-h` |
 
 ## Session Artifacts
 
-Each run creates a session folder: `sessions/<timestamp>_<pid>/`
+Each run creates a session folder: `.ralph/sessions/<timestamp>_<pid>/`
 
 | File | Description |
 |------|-------------|
 | `summary.md` | Complete session summary with metadata, prompt, stats, and responses |
 | `prompt_input.txt` | The original prompt text |
 | `prompt_<n>.txt` | Full prompt sent to Codex for iteration N (includes context) |
-| `last_response.md` | Most recent response from Codex |
+| `response_<n>.md` | AI response payload for step N |
 | `engine_<n>.md` | Raw Codex output/logs for iteration N |
+| `changes_step_<n>.md` | Step-level change log. Uses Git metadata when available; falls back to modified-file listing if not in a Git repo. |
 
 `summary.md` includes:
 
@@ -330,9 +622,22 @@ When errors occur:
 ## Notes
 
 - Tested on Ubuntu only.
-- `--dry-run` still creates a session folder and summary, but skips Codex execution.
-- If `codex` is missing and not in dry-run mode, Ralph exits with a readable error and setup link.
+- `--dry-run` creates full session artifacts with mock AI responses for workflow testing.
+- Ralph auto-detects available AI engines. If none are found (and not in dry-run mode), it exits with an error.
 - When called from another repo, Ralph defaults workspace to the caller directory unless `-w` is provided.
+- Session artifacts are stored in `.ralph/sessions/` and are gitignored by default.
+- If workspace is not a Git repo, `before-session` can prompt to run `git init` (or auto-init when `RALPH_HUMAN_GUARD_ASSUME_YES=1`).
+- Enable human approval guards with `RALPH_HUMAN_GUARD=1` (session start + per-step acceptance).
+- For non-interactive runs, set `RALPH_HUMAN_GUARD_ASSUME_YES=1` to avoid prompts explicitly.
+- With human guard enabled, `before-session` also shows a plan review and asks for plan approval (yes/no), including in `--dry-run`.
+- Hook logs are written to `.ralph/sessions/<session_id>/hooks.log` and `.ralph/sessions/<session_id>/events.jsonl`.
+- Human-guard settings precedence: CLI flags > environment variables > `profile.toml` defaults.
+- If no test runner is detected, `testing.sh` can prompt to create/run a temporary sanity test suite for the current step.
+- You can disable this fallback with `RALPH_TEMP_TEST_SUITE_ON_NO_TESTS=0`.
+- `source_control_*` settings in `profile.toml` control whether auto-commits are allowed and whether a new branch is created per session.
+- Issue/ticket adapters are optional and agnostic (`issues_provider = none|git|jira`).
+- Filesystem checkpoints are stored in `.ralph/sessions/<session_id>/checkpoints/` (`pre`, `step_<n>`), and can be restored with:
+  `./.ralph/lib/checkpoint/restore-checkpoint.sh --session-id <id> --checkpoint pre`
 
 ## Sandboxing
 
@@ -340,13 +645,13 @@ Ralph runs AI-generated code with full file system access. To limit risk, consid
 
 **Use the workspace flag:**
 ```bash
-./ralph.sh -i 3 -p "Refactor auth" -w /tmp/sandbox-project
+./ralph.sh -i 3 -g "Refactor auth" -w /tmp/sandbox-project
 ```
 
 **Git worktree (isolated branch copy):**
 ```bash
 git worktree add ../sandbox-branch
-./ralph.sh -i 3 -p "Experiment with new API" -w ../sandbox-branch
+./ralph.sh -i 3 -g "Experiment with new API" -w ../sandbox-branch
 git worktree remove ../sandbox-branch  # cleanup
 ```
 
@@ -359,13 +664,13 @@ Ralph has built-in Docker support using `Dockerfile` in the repository root.
 ./ralph.sh --docker-build
 
 # Run in docker (auto-builds if needed)
-./ralph.sh --docker -i 3 -p "Refactor module"
+./ralph.sh --docker -i 3 -g "Refactor module"
 
 # Force rebuild and run (use after updating ralph.sh)
-./ralph.sh --docker-rebuild -i 3 -p "Refactor module"
+./ralph.sh --docker-rebuild -i 3 -g "Refactor module"
 
 # With workspace and plan file
-./ralph.sh --docker -i 3 -p "Improve code" -w ~/myproject -P ~/AGENTS.md
+./ralph.sh --docker -i 3 -g "Improve code" -w ~/myproject -G ~/AGENTS.md
 ```
 
 Docker features:
@@ -377,7 +682,7 @@ Docker features:
 
 **Firejail (Linux):**
 ```bash
-firejail --private=./sandbox --net=none ./ralph.sh -i 3 -p "Optimize queries"
+firejail --private=./sandbox --net=none ./ralph.sh -i 3 -g "Optimize queries"
 ```
 
 **Best practices:**
@@ -392,7 +697,7 @@ Include git instructions in your prompt so each iteration is committed:
 
 ```bash
 git checkout -b ralph/improve-tests
-./ralph.sh -i 5 -p "Improve test coverage. After each change, commit with a descriptive message."
+./ralph.sh -i 5 -g "Improve test coverage. After each change, commit with a descriptive message."
 git push -u origin ralph/improve-tests
 gh pr create --title "Ralph: Improve test coverage" --body "Automated improvements"
 ```
@@ -408,7 +713,7 @@ Or add git workflow to your plan file (`AGENTS.md`):
 ```
 
 ```bash
-./ralph.sh -i 5 -p "Improve test coverage" -P AGENTS.md
+./ralph.sh -i 5 -g "Improve test coverage" -G AGENTS.md
 ```
 
 Benefits:

@@ -1,0 +1,50 @@
+{
+  "goal": "Refactor module with safety checks",
+  "steps": [
+    {
+      "id": "step-1-map",
+      "description": "Map current module responsibilities and hotspots",
+      "acceptance": "Hotspots are identified with a short risk note",
+      "status": "pending",
+      "commit": null,
+      "created_at": "2026-02-19T00:00:00Z",
+      "updated_at": "2026-02-19T00:00:00Z",
+      "completed_at": null
+    },
+    {
+      "id": "step-2-refactor",
+      "description": "Apply one minimal structural refactor",
+      "acceptance": "One focused code change is proposed with rationale",
+      "status": "pending",
+      "commit": null,
+      "created_at": "2026-02-19T00:00:00Z",
+      "updated_at": "2026-02-19T00:00:00Z",
+      "completed_at": null
+    },
+    {
+      "id": "step-3-validate",
+      "description": "Run or simulate validation checks",
+      "acceptance": "Validation result is explicit and actionable",
+      "status": "pending",
+      "commit": null,
+      "created_at": "2026-02-19T00:00:00Z",
+      "updated_at": "2026-02-19T00:00:00Z",
+      "completed_at": null
+    },
+    {
+      "id": "step-4-report",
+      "description": "Summarize change impact and next step",
+      "acceptance": "Summary includes risks and recommendation",
+      "status": "pending",
+      "commit": null,
+      "created_at": "2026-02-19T00:00:00Z",
+      "updated_at": "2026-02-19T00:00:00Z",
+      "completed_at": null
+    }
+  ],
+  "generated_at": "2026-02-19T00:00:00Z",
+  "updated_at": "2026-02-19T00:00:00Z",
+  "approved_by": null,
+  "approved_at": null,
+  "approval_source": null
+}

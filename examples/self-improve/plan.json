@@ -1,0 +1,60 @@
+{
+  "goal": "Iteratively improve Ralph itself with small, safe changes",
+  "steps": [
+    {
+      "id": "step-1-scan",
+      "description": "Audit one workflow pain point in ralph.sh or hooks",
+      "acceptance": "Pain point is clearly described with impact",
+      "status": "pending",
+      "commit": null,
+      "created_at": "2026-02-19T00:00:00Z",
+      "updated_at": "2026-02-19T00:00:00Z",
+      "completed_at": null
+    },
+    {
+      "id": "step-2-design",
+      "description": "Propose one focused improvement and tradeoffs",
+      "acceptance": "Proposal is minimal and reversible",
+      "status": "pending",
+      "commit": null,
+      "created_at": "2026-02-19T00:00:00Z",
+      "updated_at": "2026-02-19T00:00:00Z",
+      "completed_at": null
+    },
+    {
+      "id": "step-3-implement",
+      "description": "Implement the smallest useful change",
+      "acceptance": "At least one concrete file edit is made",
+      "status": "pending",
+      "commit": null,
+      "created_at": "2026-02-19T00:00:00Z",
+      "updated_at": "2026-02-19T00:00:00Z",
+      "completed_at": null
+    },
+    {
+      "id": "step-4-verify",
+      "description": "Run validation (shell syntax + dry-run) and capture result",
+      "acceptance": "Validation outcome is explicit",
+      "status": "pending",
+      "commit": null,
+      "created_at": "2026-02-19T00:00:00Z",
+      "updated_at": "2026-02-19T00:00:00Z",
+      "completed_at": null
+    },
+    {
+      "id": "step-5-report",
+      "description": "Summarize improvements and list next hypothesis",
+      "acceptance": "Summary includes what changed and why",
+      "status": "pending",
+      "commit": null,
+      "created_at": "2026-02-19T00:00:00Z",
+      "updated_at": "2026-02-19T00:00:00Z",
+      "completed_at": null
+    }
+  ],
+  "generated_at": "2026-02-19T00:00:00Z",
+  "updated_at": "2026-02-19T00:00:00Z",
+  "approved_by": null,
+  "approved_at": null,
+  "approval_source": null
+}

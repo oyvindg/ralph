@@ -1,1 +1,8 @@
+# Ralph sessions (auto-generated)
+.ralph/sessions/
+
+# Legacy location
 sessions/
+
+# work in progress
+dev/

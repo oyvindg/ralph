@@ -1,0 +1,50 @@
+{
+  "goal": "Documentation cleanup and consistency",
+  "steps": [
+    {
+      "id": "step-1-audit",
+      "description": "Audit docs for outdated or conflicting guidance",
+      "acceptance": "Key doc gaps are listed",
+      "status": "pending",
+      "commit": null,
+      "created_at": "2026-02-19T00:00:00Z",
+      "updated_at": "2026-02-19T00:00:00Z",
+      "completed_at": null
+    },
+    {
+      "id": "step-2-structure",
+      "description": "Propose a clearer section structure",
+      "acceptance": "Suggested structure is concrete",
+      "status": "pending",
+      "commit": null,
+      "created_at": "2026-02-19T00:00:00Z",
+      "updated_at": "2026-02-19T00:00:00Z",
+      "completed_at": null
+    },
+    {
+      "id": "step-3-rewrite",
+      "description": "Rewrite one section for clarity",
+      "acceptance": "One section is rewritten in plain language",
+      "status": "pending",
+      "commit": null,
+      "created_at": "2026-02-19T00:00:00Z",
+      "updated_at": "2026-02-19T00:00:00Z",
+      "completed_at": null
+    },
+    {
+      "id": "step-4-style-check",
+      "description": "Verify terminology/style consistency",
+      "acceptance": "Terminology is consistent across touched text",
+      "status": "pending",
+      "commit": null,
+      "created_at": "2026-02-19T00:00:00Z",
+      "updated_at": "2026-02-19T00:00:00Z",
+      "completed_at": null
+    }
+  ],
+  "generated_at": "2026-02-19T00:00:00Z",
+  "updated_at": "2026-02-19T00:00:00Z",
+  "approved_by": null,
+  "approved_at": null,
+  "approval_source": null
+}

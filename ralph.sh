@@ -2,6 +2,12 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RALPH_VERSION="0.1.0"
+
+if [[ -f "${SCRIPT_DIR}/.ralph/lib/version.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/.ralph/lib/version.sh"
+fi
 
 # =============================================================================
 # Global Variables
@@ -9,15 +15,37 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CALLER_ROOT="$(pwd)"
 ROOT="${CALLER_ROOT}"
 WORKSPACE=""
-ITERATIONS=3
-PROMPT=""
-PLAN_PATH=""
-PLAN_CONTENT=""
+MAX_STEPS=0  # 0 = no limit (run all pending steps)
+GOAL=""
+PLAN_FILE="plan.json"
+PLAN_FILE_PATH=""
+PLAN_CLI_SET=0
+GUIDE_PATH=""
+GUIDE_CONTENT=""
 DRY_RUN=0
 TIMEOUT_SECONDS=""
 MODEL=""
 NO_COLORS=0
 SKIP_GIT_CHECK=0
+HUMAN_GUARD=""
+HUMAN_GUARD_ASSUME_YES=""
+HUMAN_GUARD_SCOPE=""
+TICKET=""
+SOURCE_CONTROL_ENABLED=""
+SOURCE_CONTROL_BACKEND=""
+SOURCE_CONTROL_ALLOW_COMMITS=""
+SOURCE_CONTROL_BRANCH_PER_SESSION=""
+SOURCE_CONTROL_BRANCH_NAME_TEMPLATE=""
+SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH=""
+ISSUES_PROVIDER=""
+CHECKPOINT_ENABLED=""
+CHECKPOINT_PER_STEP=""
+CHECKPOINT_MODE=""
+ENGINE_CLI_SET=0
+MODEL_CLI_SET=0
+ACTIVE_ENGINE=""
+ACTIVE_MODEL=""
+STATE_FILE_PATH=""
 
 # Session variables (set in setup_session)
 session_dir=""
@@ -32,7 +60,35 @@ session_start_iso=""
 total_duration_sec=0
 
 # Color variables (set in setup_colors)
-C_RESET="" C_BOLD="" C_DIM="" C_RED="" C_GREEN="" C_YELLOW="" C_BLUE="" C_CYAN=""
+C_RESET="" C_BOLD="" C_DIM="" C_RED="" C_GREEN="" C_YELLOW="" C_BLUE="" C_CYAN="" C_MAGENTA=""
+
+# Ralph config directories (set in find_ralph_dirs)
+RALPH_PROJECT_DIR=""   # <project>/.ralph
+RALPH_GLOBAL_DIR=""    # ~/.ralph
+
+# Profile values (set in load_profile)
+PROFILE_STEPS=""
+PROFILE_ENGINE=""
+PROFILE_MODEL=""
+PROFILE_TIMEOUT=""
+PROFILE_SKIP_GIT_CHECK=""
+PROFILE_DISABLED_HOOKS=""
+PROFILE_AUTHOR=""
+PROFILE_PROJECT=""
+PROFILE_HUMAN_GUARD=""
+PROFILE_HUMAN_GUARD_ASSUME_YES=""
+PROFILE_HUMAN_GUARD_SCOPE=""
+PROFILE_AGENT_ROUTES=""
+PROFILE_TICKET=""
+PROFILE_SOURCE_CONTROL_ENABLED=""
+PROFILE_SOURCE_CONTROL_BACKEND=""
+PROFILE_SOURCE_CONTROL_ALLOW_COMMITS=""
+PROFILE_SOURCE_CONTROL_BRANCH_PER_SESSION=""
+PROFILE_SOURCE_CONTROL_BRANCH_NAME_TEMPLATE=""
+PROFILE_SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH=""
+PROFILE_ISSUES_PROVIDER=""
+PROFILE_CHECKPOINT_ENABLED=""
+PROFILE_CHECKPOINT_PER_STEP=""
 
 # =============================================================================
 # Docker Functions
@@ -52,24 +108,36 @@ docker_run() {
     docker_build
   fi
 
-  # Parse args to find workspace (-w) and plan (-P) paths for mounting
+  # Parse args to find workspace/plan/guide paths for mounting
   declare -A MOUNT_PATHS
   local DOCKER_ARGS=()
   local DOCKER_WORKSPACE=""
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      -w|--workspace)
+      --workspace)
         DOCKER_WORKSPACE="$(cd "${2/#\~/$HOME}" && pwd)"
         MOUNT_PATHS["${DOCKER_WORKSPACE}"]=1
         DOCKER_ARGS+=("$1" "${DOCKER_WORKSPACE}")
         shift 2
         ;;
-      -P|--plan)
-        local plan_path="${2/#\~/$HOME}"
-        plan_path="$(cd "$(dirname "${plan_path}")" && pwd)/$(basename "${plan_path}")"
-        MOUNT_PATHS["$(dirname "${plan_path}")"]=1
-        DOCKER_ARGS+=("$1" "${plan_path}")
+      --plan)
+        local plan_arg="${2/#\~/$HOME}"
+        if [[ "${plan_arg}" == */* ]]; then
+          local plan_dir
+          plan_dir="$(cd "$(dirname "${plan_arg}")" && pwd)"
+          MOUNT_PATHS["${plan_dir}"]=1
+          DOCKER_ARGS+=("$1" "${plan_dir}/$(basename "${plan_arg}")")
+        else
+          DOCKER_ARGS+=("$1" "${plan_arg}")
+        fi
+        shift 2
+        ;;
+      --guide)
+        local guide_path="${2/#\~/$HOME}"
+        guide_path="$(cd "$(dirname "${guide_path}")" && pwd)/$(basename "${guide_path}")"
+        MOUNT_PATHS["$(dirname "${guide_path}")"]=1
+        DOCKER_ARGS+=("$1" "${guide_path}")
         shift 2
         ;;
       *)
@@ -149,33 +217,689 @@ check_docker_delegation() {
 }
 
 # =============================================================================
+# Configuration Functions
+# =============================================================================
+
+# Find .ralph directories (project and global)
+find_ralph_dirs() {
+  RALPH_GLOBAL_DIR="${HOME}/.ralph"
+
+  # Search for project .ralph starting from ROOT, walking up to filesystem root
+  local dir="${ROOT}"
+  while [[ "${dir}" != "/" ]]; do
+    if [[ -d "${dir}/.ralph" ]]; then
+      RALPH_PROJECT_DIR="${dir}/.ralph"
+      break
+    fi
+    dir="$(dirname "${dir}")"
+  done
+}
+
+# Parse a simple TOML value (handles strings, numbers, booleans, arrays)
+# Usage: parse_toml_value "key" "file"
+parse_toml_value() {
+  local key="$1"
+  local file="$2"
+  [[ ! -f "${file}" ]] && return
+
+  # Extract value after key =
+  local value
+  value=$(grep -E "^${key}[[:space:]]*=" "${file}" 2>/dev/null | head -n1 | sed 's/^[^=]*=[[:space:]]*//' | sed 's/[[:space:]]*$//')
+
+  # Remove surrounding quotes if present
+  if [[ "${value}" =~ ^\"(.*)\"$ ]]; then
+    value="${BASH_REMATCH[1]}"
+  fi
+
+  printf '%s' "${value}"
+}
+
+# Parse TOML array value
+# Usage: parse_toml_array "key" "file"
+parse_toml_array() {
+  local key="$1"
+  local file="$2"
+  [[ ! -f "${file}" ]] && return
+
+  local value items
+  value="$(
+    awk -v key="${key}" '
+      BEGIN { in_array = 0 }
+      $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
+        line = $0
+        sub(/^[^=]*=/, "", line)
+        print line
+        if (line ~ /\]/) exit
+        in_array = 1
+        next
+      }
+      in_array == 1 {
+        print $0
+        if ($0 ~ /\]/) exit
+      }
+    ' "${file}" 2>/dev/null | tr '\n' ' '
+  )"
+
+  # Extract array contents: ["a", "b"] -> a b
+  if [[ "${value}" =~ \[(.*)\] ]]; then
+    items="${BASH_REMATCH[1]}"
+    printf '%s' "${items}" | tr ',' '\n' | sed 's/^[[:space:]]*"//' | sed 's/"[[:space:]]*$//' | tr '\n' ' '
+  fi
+  return 0
+}
+
+# Load and merge profile.toml files
+load_profile() {
+  local global_profile="${RALPH_GLOBAL_DIR}/profile.toml"
+  local project_profile="${RALPH_PROJECT_DIR}/profile.toml"
+
+  # Load global first
+  if [[ -f "${global_profile}" ]]; then
+    PROFILE_STEPS=$(parse_toml_value "steps" "${global_profile}")
+    # Fallback to "iterations" for backward compatibility
+    [[ -z "${PROFILE_STEPS}" ]] && PROFILE_STEPS=$(parse_toml_value "iterations" "${global_profile}")
+    PROFILE_ENGINE=$(parse_toml_value "engine" "${global_profile}")
+    PROFILE_MODEL=$(parse_toml_value "model" "${global_profile}")
+    PROFILE_TIMEOUT=$(parse_toml_value "timeout" "${global_profile}")
+    PROFILE_SKIP_GIT_CHECK=$(parse_toml_value "skip_git_check" "${global_profile}")
+    PROFILE_DISABLED_HOOKS=$(parse_toml_array "disabled" "${global_profile}")
+    PROFILE_AUTHOR=$(parse_toml_value "author" "${global_profile}")
+    PROFILE_PROJECT=$(parse_toml_value "project" "${global_profile}")
+    PROFILE_HUMAN_GUARD=$(parse_toml_value "human_guard" "${global_profile}")
+    PROFILE_HUMAN_GUARD_ASSUME_YES=$(parse_toml_value "human_guard_assume_yes" "${global_profile}")
+    PROFILE_HUMAN_GUARD_SCOPE=$(parse_toml_value "human_guard_scope" "${global_profile}")
+    PROFILE_AGENT_ROUTES=$(parse_toml_array "agent_routes" "${global_profile}")
+    PROFILE_TICKET=$(parse_toml_value "ticket" "${global_profile}")
+    PROFILE_SOURCE_CONTROL_ENABLED=$(parse_toml_value "source_control_enabled" "${global_profile}")
+    PROFILE_SOURCE_CONTROL_BACKEND=$(parse_toml_value "source_control_backend" "${global_profile}")
+    PROFILE_SOURCE_CONTROL_ALLOW_COMMITS=$(parse_toml_value "source_control_allow_commits" "${global_profile}")
+    PROFILE_SOURCE_CONTROL_BRANCH_PER_SESSION=$(parse_toml_value "source_control_branch_per_session" "${global_profile}")
+    PROFILE_SOURCE_CONTROL_BRANCH_NAME_TEMPLATE=$(parse_toml_value "source_control_branch_name_template" "${global_profile}")
+    PROFILE_SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH=$(parse_toml_value "source_control_require_ticket_for_branch" "${global_profile}")
+    PROFILE_ISSUES_PROVIDER=$(parse_toml_value "issues_provider" "${global_profile}")
+    PROFILE_CHECKPOINT_ENABLED=$(parse_toml_value "checkpoint_enabled" "${global_profile}")
+    PROFILE_CHECKPOINT_PER_STEP=$(parse_toml_value "checkpoint_per_step" "${global_profile}")
+  fi
+
+  # Project overrides global
+  if [[ -n "${RALPH_PROJECT_DIR}" ]] && [[ -f "${project_profile}" ]]; then
+    local val
+    val=$(parse_toml_value "steps" "${project_profile}")
+    [[ -z "${val}" ]] && val=$(parse_toml_value "iterations" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_STEPS="${val}"
+
+    val=$(parse_toml_value "model" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_MODEL="${val}"
+
+    val=$(parse_toml_value "engine" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_ENGINE="${val}"
+
+    val=$(parse_toml_value "timeout" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_TIMEOUT="${val}"
+
+    val=$(parse_toml_value "skip_git_check" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_SKIP_GIT_CHECK="${val}"
+
+    val=$(parse_toml_array "disabled" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_DISABLED_HOOKS="${val}"
+
+    val=$(parse_toml_value "author" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_AUTHOR="${val}"
+
+    val=$(parse_toml_value "project" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_PROJECT="${val}"
+
+    val=$(parse_toml_value "human_guard" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_HUMAN_GUARD="${val}"
+
+    val=$(parse_toml_value "human_guard_assume_yes" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_HUMAN_GUARD_ASSUME_YES="${val}"
+
+    val=$(parse_toml_value "human_guard_scope" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_HUMAN_GUARD_SCOPE="${val}"
+
+    val=$(parse_toml_array "agent_routes" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_AGENT_ROUTES="${val}"
+
+    val=$(parse_toml_value "ticket" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_TICKET="${val}"
+
+    val=$(parse_toml_value "source_control_enabled" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_ENABLED="${val}"
+
+    val=$(parse_toml_value "source_control_backend" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_BACKEND="${val}"
+
+    val=$(parse_toml_value "source_control_allow_commits" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_ALLOW_COMMITS="${val}"
+
+    val=$(parse_toml_value "source_control_branch_per_session" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_BRANCH_PER_SESSION="${val}"
+
+    val=$(parse_toml_value "source_control_branch_name_template" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_BRANCH_NAME_TEMPLATE="${val}"
+
+    val=$(parse_toml_value "source_control_require_ticket_for_branch" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH="${val}"
+
+    val=$(parse_toml_value "issues_provider" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_ISSUES_PROVIDER="${val}"
+
+    val=$(parse_toml_value "checkpoint_enabled" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_CHECKPOINT_ENABLED="${val}"
+
+    val=$(parse_toml_value "checkpoint_per_step" "${project_profile}")
+    [[ -n "${val}" ]] && PROFILE_CHECKPOINT_PER_STEP="${val}"
+  fi
+}
+
+# Load UI helpers when available (project first, then global, then built-in).
+load_ui_helpers() {
+  local candidates=()
+  [[ -n "${RALPH_PROJECT_DIR}" ]] && candidates+=("${RALPH_PROJECT_DIR}/lib/ui.sh")
+  candidates+=("${RALPH_GLOBAL_DIR}/lib/ui.sh")
+  candidates+=("${SCRIPT_DIR}/.ralph/lib/ui.sh")
+
+  local path
+  for path in "${candidates[@]}"; do
+    if [[ -f "${path}" ]]; then
+      # shellcheck disable=SC1090
+      source "${path}"
+      return 0
+    fi
+  done
+}
+
+# Load core libs when available (project first, then global, then built-in).
+load_core_libs() {
+  local candidates=()
+  [[ -n "${RALPH_PROJECT_DIR}" ]] && candidates+=("${RALPH_PROJECT_DIR}/lib/state.sh")
+  candidates+=("${RALPH_GLOBAL_DIR}/lib/state.sh")
+  candidates+=("${SCRIPT_DIR}/.ralph/lib/state.sh")
+
+  local path
+  for path in "${candidates[@]}"; do
+    if [[ -f "${path}" ]]; then
+      # shellcheck disable=SC1090
+      source "${path}"
+      return 0
+    fi
+  done
+}
+
+# Prints newline-separated readable JSON plan candidates under .ralph/plans.
+list_plan_candidates() {
+  local plans_dir="${ROOT}/.ralph/plans"
+  [[ -d "${plans_dir}" ]] || return 0
+  find "${plans_dir}" -maxdepth 1 -type f -name '*.json' -readable | sort
+}
+
+# Lets user choose a plan from candidates (4 visible options at a time).
+# Returns selected absolute path on stdout.
+select_plan_interactive() {
+  local -a candidates=("$@")
+  local i choice
+  local -a labels=()
+  for ((i=0; i<${#candidates[@]}; i++)); do
+    labels+=("$(to_rel_path "${candidates[i]}")")
+  done
+  labels+=("Create new plan from prompt...")
+
+  if command -v ui_prompt_menu_window >/dev/null 2>&1 && [[ -t 0 ]]; then
+    choice="$(ui_prompt_menu_window 4 "Select plan file:" "${labels[@]}")"
+    if [[ "${choice}" =~ ^[0-9]+$ ]] && [[ "${choice}" -eq $(( ${#candidates[@]} + 1 )) ]]; then
+      printf '%s\n' "__CREATE_NEW_PLAN__"
+      return 0
+    fi
+    if [[ "${choice}" =~ ^[0-9]+$ ]] && [[ "${choice}" -ge 1 ]] && [[ "${choice}" -le ${#candidates[@]} ]]; then
+      printf '%s\n' "${candidates[$((choice - 1))]}"
+      return 0
+    fi
+  fi
+
+  # Fallback without UI helper/TTY: choose first candidate.
+  printf '%s\n' "${candidates[0]}"
+}
+
+# Creates a new plan file interactively and returns its absolute path.
+create_new_plan_from_prompt_interactive() {
+  [[ -t 0 ]] || return 1
+
+  local default_name plan_name goal_prompt plan_path now
+  default_name="plan-$(date +%Y%m%d_%H%M%S).json"
+
+  read -r -p "New plan file name (.ralph/plans, default: ${default_name}): " plan_name
+  [[ -z "${plan_name}" ]] && plan_name="${default_name}"
+  plan_name="$(basename "${plan_name}")"
+  [[ "${plan_name}" == *.json ]] || plan_name="${plan_name}.json"
+  plan_path="${ROOT}/.ralph/plans/${plan_name}"
+  mkdir -p "$(dirname "${plan_path}")"
+
+  if [[ -f "${plan_path}" ]]; then
+    local overwrite
+    read -r -p "Plan already exists (${plan_name}). Overwrite? [y/N]: " overwrite
+    case "${overwrite}" in
+      y|Y|yes|YES) ;;
+      *) return 1 ;;
+    esac
+  fi
+
+  read -r -p "Plan goal/prompt (default: ${GOAL}): " goal_prompt
+  [[ -z "${goal_prompt}" ]] && goal_prompt="${GOAL}"
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  if command -v jq >/dev/null 2>&1; then
+    jq -n --arg goal "${goal_prompt}" --arg now "${now}" '
+      {
+        goal: $goal,
+        steps: [
+          {
+            id: "step-1-scan",
+            description: "Scan current state and identify most important improvement area",
+            acceptance: "One concrete improvement target is identified",
+            status: "pending",
+            commit: null,
+            created_at: $now,
+            updated_at: $now,
+            completed_at: null
+          },
+          {
+            id: "step-2-change",
+            description: "Apply one focused change",
+            acceptance: "At least one file is changed with clear rationale",
+            status: "pending",
+            commit: null,
+            created_at: $now,
+            updated_at: $now,
+            completed_at: null
+          },
+          {
+            id: "step-3-validate",
+            description: "Validate outcome with tests or checks",
+            acceptance: "Validation result is explicitly reported",
+            status: "pending",
+            commit: null,
+            created_at: $now,
+            updated_at: $now,
+            completed_at: null
+          },
+          {
+            id: "step-4-report",
+            description: "Summarize changes and next iteration hypothesis",
+            acceptance: "Summary includes what changed and proposed next step",
+            status: "pending",
+            commit: null,
+            created_at: $now,
+            updated_at: $now,
+            completed_at: null
+          }
+        ],
+        generated_at: $now,
+        updated_at: $now,
+        approved_by: null,
+        approved_at: null,
+        approval_source: null
+      }' > "${plan_path}"
+  else
+    cat > "${plan_path}" <<EOF
+{
+  "goal": "${goal_prompt}",
+  "steps": [],
+  "generated_at": "${now}",
+  "updated_at": "${now}",
+  "approved_by": null,
+  "approved_at": null,
+  "approval_source": null
+}
+EOF
+  fi
+
+  printf '%s\n' "${plan_path}"
+}
+
+# Resolve effective engine/model for one step using profile agent routes.
+# Route format:
+#   agent_routes = ["<match>|<engine>|<model>", "default|<engine>|<model>"]
+# Match is case-insensitive substring against step id + description.
+# Use "-" as model to keep the current/default model for that route.
+resolve_agent_for_step() {
+  local step_id="${1:-}"
+  local step_desc="${2:-}"
+  local haystack route matched=0
+  local default_engine="" default_model=""
+  local route_match route_engine route_model
+
+  ACTIVE_ENGINE="${RALPH_ENGINE:-codex}"
+  ACTIVE_MODEL="${MODEL:-}"
+
+  # CLI flags always win over profile routing.
+  if [[ "${ENGINE_CLI_SET}" -eq 1 || "${MODEL_CLI_SET}" -eq 1 ]]; then
+    return 0
+  fi
+
+  haystack="$(printf '%s %s' "${step_id}" "${step_desc}" | tr '[:upper:]' '[:lower:]')"
+
+  for route in ${PROFILE_AGENT_ROUTES:-}; do
+    route_match=""
+    route_engine=""
+    route_model=""
+    IFS='|' read -r route_match route_engine route_model <<< "${route}"
+    route_match="$(printf '%s' "${route_match}" | tr '[:upper:]' '[:lower:]')"
+
+    [[ -z "${route_match}" || -z "${route_engine}" ]] && continue
+
+    if [[ "${route_match}" == "default" ]]; then
+      default_engine="${route_engine}"
+      default_model="${route_model}"
+      continue
+    fi
+
+    if [[ "${haystack}" == *"${route_match}"* ]]; then
+      ACTIVE_ENGINE="${route_engine}"
+      if [[ -n "${route_model}" && "${route_model}" != "-" ]]; then
+        ACTIVE_MODEL="${route_model}"
+      fi
+      matched=1
+      break
+    fi
+  done
+
+  if [[ "${matched}" -eq 0 ]] && [[ -n "${default_engine}" ]]; then
+    ACTIVE_ENGINE="${default_engine}"
+    if [[ -n "${default_model}" && "${default_model}" != "-" ]]; then
+      ACTIVE_MODEL="${default_model}"
+    fi
+  fi
+}
+
+# Resolve execution plan path from --plan/-p argument.
+# - bare filename -> <workspace>/.ralph/plans/<filename>
+# - path (absolute/relative) -> resolved against cwd/workspace
+resolve_plan_file_path() {
+  local input="$1"
+  [[ -z "${input}" ]] && return
+
+  input="${input/#\~/$HOME}"
+  if [[ "${input}" == */* ]]; then
+    if [[ "${input}" == /* ]]; then
+      printf '%s' "${input}"
+    else
+      printf '%s' "${ROOT}/${input}"
+    fi
+    return
+  fi
+
+  printf '%s' "${ROOT}/.ralph/plans/${input}"
+}
+
+# Resolve hook script path
+# Usage: resolve_hook "hook-name"
+resolve_hook() {
+  local hook_name="$1"
+  local hook_file="${hook_name}.sh"
+
+  # Check if hook is disabled
+  if [[ " ${PROFILE_DISABLED_HOOKS} " == *" ${hook_name} "* ]]; then
+    return
+  fi
+
+  # Project first
+  if [[ -n "${RALPH_PROJECT_DIR}" ]] && [[ -x "${RALPH_PROJECT_DIR}/hooks/${hook_file}" ]]; then
+    printf '%s' "${RALPH_PROJECT_DIR}/hooks/${hook_file}"
+    return
+  fi
+
+  # Global fallback
+  if [[ -x "${RALPH_GLOBAL_DIR}/hooks/${hook_file}" ]]; then
+    printf '%s' "${RALPH_GLOBAL_DIR}/hooks/${hook_file}"
+    return
+  fi
+
+  # Built-in fallback (ralph repository hooks)
+  if [[ -x "${SCRIPT_DIR}/.ralph/hooks/${hook_file}" ]]; then
+    printf '%s' "${SCRIPT_DIR}/.ralph/hooks/${hook_file}"
+    return
+  fi
+}
+
+# =============================================================================
+# Plan Functions
+# =============================================================================
+
+# Path to plan.json
+plan_json_path() {
+  if [[ -n "${PLAN_FILE_PATH}" ]]; then
+    printf '%s' "${PLAN_FILE_PATH}"
+  else
+    printf '%s' "${ROOT}/.ralph/plans/plan.json"
+  fi
+}
+
+# Check if plan exists
+plan_exists() {
+  [[ -f "$(plan_json_path)" ]]
+}
+
+# Get total number of steps
+get_step_count() {
+  local plan_file
+  plan_file=$(plan_json_path)
+  [[ -f "${plan_file}" ]] || { echo "0"; return; }
+  jq -r '.steps | length' "${plan_file}" 2>/dev/null || echo "0"
+}
+
+# Get count of pending steps
+get_pending_count() {
+  local plan_file
+  plan_file=$(plan_json_path)
+  [[ -f "${plan_file}" ]] || { echo "0"; return; }
+  jq -r '[.steps[] | select(.status == "pending")] | length' "${plan_file}" 2>/dev/null || echo "0"
+}
+
+# Get the next pending step (returns JSON or empty)
+get_current_step() {
+  local plan_file
+  plan_file=$(plan_json_path)
+  [[ -f "${plan_file}" ]] || return
+
+  jq -r '.steps[] | select(.status == "pending") | @json' "${plan_file}" 2>/dev/null | head -n1
+}
+
+# Get current step ID
+get_current_step_id() {
+  local step_json
+  step_json=$(get_current_step)
+  [[ -z "${step_json}" ]] && return
+  echo "${step_json}" | jq -r '.id' 2>/dev/null
+}
+
+# Get current step description
+get_current_step_description() {
+  local step_json
+  step_json=$(get_current_step)
+  [[ -z "${step_json}" ]] && return
+  echo "${step_json}" | jq -r '.description' 2>/dev/null
+}
+
+# Get current step acceptance criteria
+get_current_step_acceptance() {
+  local step_json
+  step_json=$(get_current_step)
+  [[ -z "${step_json}" ]] && return
+  echo "${step_json}" | jq -r '.acceptance' 2>/dev/null
+}
+
+# Update step status in plan.json
+# Usage: update_step_status "step-id" "new-status" ["commit-hash"]
+update_step_status() {
+  local step_id="$1"
+  local new_status="$2"
+  local commit_hash="${3:-}"
+  local plan_file
+  local now
+  plan_file=$(plan_json_path)
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  [[ -f "${plan_file}" ]] || return 1
+
+  local tmp_file="${plan_file}.tmp"
+
+  if [[ -n "${commit_hash}" ]]; then
+    jq --arg id "${step_id}" --arg status "${new_status}" --arg commit "${commit_hash}" --arg now "${now}" \
+      '.steps = [.steps[] | if .id == $id then .status = $status | .commit = $commit | .updated_at = $now | .completed_at = (if $status == "completed" then $now elif ($status == "pending" or $status == "in_progress") then null else .completed_at end) else . end]
+       | .updated_at = $now' \
+      "${plan_file}" > "${tmp_file}"
+  else
+    jq --arg id "${step_id}" --arg status "${new_status}" --arg now "${now}" \
+      '.steps = [.steps[] | if .id == $id then .status = $status | .updated_at = $now | .completed_at = (if $status == "completed" then $now elif ($status == "pending" or $status == "in_progress") then null else .completed_at end) else . end]
+       | .updated_at = $now' \
+      "${plan_file}" > "${tmp_file}"
+  fi
+
+  mv "${tmp_file}" "${plan_file}"
+}
+
+# Get plan goal
+get_plan_goal() {
+  local plan_file
+  plan_file=$(plan_json_path)
+  [[ -f "${plan_file}" ]] || return
+  jq -r '.goal // empty' "${plan_file}" 2>/dev/null
+}
+
+# Run a hook with environment variables
+# Returns the hook's exit code (0 if no hook exists)
+run_hook() {
+  local hook_name="$1"
+  local step="${2:-}"
+  local step_exit_code="${3:-}"
+  local hook_depth="${RALPH_HOOK_DEPTH:-0}"
+
+  local hook_path
+  hook_path=$(resolve_hook "${hook_name}")
+
+  # No hook found, success
+  [[ -z "${hook_path}" ]] && return 0
+
+  # Set up environment
+  export RALPH_SESSION_ID="${session_id}"
+  export RALPH_SESSION_DIR="${session_dir}"
+  export RALPH_WORKSPACE="${ROOT}"
+  export RALPH_STEPS="${MAX_STEPS}"
+  export RALPH_PROMPT_FILE="${prompt_input_file:-}"
+  export RALPH_RESPONSE_FILE="${last_response:-}"
+  export RALPH_PLAN_FILE="$(plan_json_path)"
+  export RALPH_GUIDE_FILE="${GUIDE_PATH:-}"
+  export RALPH_ENGINE="${ACTIVE_ENGINE:-${RALPH_ENGINE:-codex}}"
+  export RALPH_MODEL="${ACTIVE_MODEL:-${MODEL:-}}"
+  export RALPH_GOAL="${GOAL}"
+  export RALPH_TICKET="${TICKET:-}"
+  export RALPH_SOURCE_CONTROL_ENABLED="${SOURCE_CONTROL_ENABLED}"
+  export RALPH_SOURCE_CONTROL_BACKEND="${SOURCE_CONTROL_BACKEND}"
+  export RALPH_SOURCE_CONTROL_ALLOW_COMMITS="${SOURCE_CONTROL_ALLOW_COMMITS}"
+  export RALPH_SOURCE_CONTROL_BRANCH_PER_SESSION="${SOURCE_CONTROL_BRANCH_PER_SESSION}"
+  export RALPH_SOURCE_CONTROL_BRANCH_NAME_TEMPLATE="${SOURCE_CONTROL_BRANCH_NAME_TEMPLATE}"
+  export RALPH_SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH="${SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH}"
+  export RALPH_ISSUES_PROVIDER="${ISSUES_PROVIDER}"
+  export RALPH_CHECKPOINT_ENABLED="${CHECKPOINT_ENABLED}"
+  export RALPH_CHECKPOINT_PER_STEP="${CHECKPOINT_PER_STEP}"
+  export RALPH_TIMEOUT="${TIMEOUT_SECONDS:-0}"
+  export RALPH_DRY_RUN="${DRY_RUN}"
+  export RALPH_PROJECT_DIR="${RALPH_PROJECT_DIR:-}"
+  export RALPH_GLOBAL_DIR="${RALPH_GLOBAL_DIR:-}"
+  export RALPH_HUMAN_GUARD="${HUMAN_GUARD}"
+  export RALPH_HUMAN_GUARD_ASSUME_YES="${HUMAN_GUARD_ASSUME_YES}"
+  export RALPH_HUMAN_GUARD_SCOPE="${HUMAN_GUARD_SCOPE}"
+
+  # Step-specific vars
+  if [[ -n "${step}" ]]; then
+    export RALPH_STEP="${step}"
+    export RALPH_ENGINE_LOG="${session_dir}/engine_${step}.md"
+    export RALPH_STEP_MARKER="${session_dir}/.step_${step}.start"
+    export RALPH_CHANGE_LOG_FILE="${session_dir}/changes_step_${step}.md"
+  fi
+
+  if [[ -n "${step_exit_code}" ]]; then
+    export RALPH_STEP_EXIT_CODE="${step_exit_code}"
+  fi
+
+  # Run hook (hooks receive RALPH_DRY_RUN and handle it themselves)
+  if [[ "${DRY_RUN}" -eq 1 ]]; then
+    echo "${C_MAGENTA}[${hook_name}]${C_RESET} ${C_DIM}(dry-run)${C_RESET}"
+  else
+    echo "${C_MAGENTA}[${hook_name}]${C_RESET}"
+  fi
+
+  set +e
+  RALPH_HOOK_DEPTH="$((hook_depth + 1))" "${hook_path}"
+  local rc=$?
+  set -e
+
+  return "${rc}"
+}
+
+# List available AI engines
+list_engines() {
+  find_ralph_dirs
+
+  local ai_hook
+  ai_hook=$(resolve_hook "ai")
+
+  if [[ -n "${ai_hook}" ]]; then
+    RALPH_ENGINE=list "${ai_hook}"
+  else
+    echo "Available AI engines:"
+    echo ""
+    if command -v codex >/dev/null 2>&1; then
+      echo "  [x] codex      - OpenAI Codex CLI (built-in)"
+    else
+      echo "  [ ] codex      - OpenAI Codex CLI (not installed)"
+    fi
+    echo ""
+    echo "Note: Install .ralph/hooks/ai.sh for more engines"
+  fi
+}
+
+# =============================================================================
 # Usage
 # =============================================================================
 usage() {
   cat <<EOF
 Usage:
-  ./ralph.sh -i <N> -p "<prompt>" [options]
+  ./ralph.sh --goal "<goal>" [options]
 
 Required:
-  -i, --iterations <N>    Number of iterations (positive integer)
-  -p, --prompt "<text>"   Objective passed into each iteration
+      --goal "<text>"     The overall goal for this session
 
 Options:
-  -P, --plan <file>       Guidance file (e.g., AGENTS.md)
-  -w, --workspace <path>  Workspace directory (default: current dir)
-  -m, --model <name>      Codex model name (default: codex default)
-  -t, --timeout <sec>     Timeout per iteration in seconds (0 = disabled)
+      --steps <N>         Max steps to run (default: all pending, or profile default)
+      --plan <file>       Execution plan file (default: plan.json -> .ralph/plans/plan.json)
+      --guide <file>      Optional guidance file (e.g., AGENTS.md)
+      --workspace <path>  Workspace directory (default: current dir)
+      --model <name>      Model name (default: engine default)
+      --engine <name>     AI engine: codex, claude, ollama, openai, anthropic
+      --ticket <id>       Optional work item/ticket id (agnostic, e.g. ABC-123)
+      --timeout <sec>     Timeout per step in seconds (0 = disabled)
+      --checkpoint <mode> Checkpoint mode: off|pre|all (or 0|1)
+      --checkpoint-per-step <0|1>  Override per-step checkpoint snapshots
+      --list-engines      Show available AI engines and exit
       --no-colors         Disable ANSI colors in output
+      --human-guard <0|1> Enable/disable human approval guard
+      --human-guard-assume-yes <0|1>  Auto-approve human guard prompts (CI)
+      --human-guard-scope <session|step|both>  Where to enforce guard
       --skip-git-repo-check  Allow running in non-git directories
       --docker            Run in docker container
       --docker-build      Build docker image only
       --docker-rebuild    Run in docker, rebuild image first
-  -d, --dry-run           Print commands without executing
+      --version          Show version and exit
+      --dry-run           Run full workflow with mock AI (no API calls)
 
 Examples:
-  ./ralph.sh -i 3 -p "Improve test coverage"
-  ./ralph.sh -i 5 -p "Refactor auth module" -P AGENTS.md -m gpt-5.3-codex
-  ./ralph.sh -i 2 -p "Debug build" --dry-run
+  ./ralph.sh --goal "Improve test coverage"              # Run all pending steps
+  ./ralph.sh --goal "Refactor auth module" --steps 3     # Run max 3 steps
+  ./ralph.sh --goal "Debug build" --dry-run              # Dry-run with mock AI
+  ./ralph.sh --goal "Optimize queries" --guide AGENTS.md # With guidance file
+  ./ralph.sh --goal "Fix bug" --ticket ABC-123           # Attach work item id
 EOF
 }
 
@@ -190,54 +914,40 @@ parse_args() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --iterations|-i) ITERATIONS="${2:-}"; shift 2 ;;
-      --prompt|-p) PROMPT="${2:-}"; shift 2 ;;
-      --plan|-P) PLAN_PATH="${2:-}"; shift 2 ;;
-      --workspace|-w) WORKSPACE="${2:-}"; shift 2 ;;
-      --model|-m) MODEL="${2:-}"; shift 2 ;;
-      --timeout|-t) TIMEOUT_SECONDS="${2:-}"; shift 2 ;;
-      --dry-run|-d) DRY_RUN=1; shift ;;
+      --steps|--iterations) MAX_STEPS="${2:-}"; shift 2 ;;
+      --goal) GOAL="${2:-}"; shift 2 ;;
+      --plan) PLAN_FILE="${2:-}"; PLAN_CLI_SET=1; shift 2 ;;
+      --guide) GUIDE_PATH="${2:-}"; shift 2 ;;
+      --workspace) WORKSPACE="${2:-}"; shift 2 ;;
+      --model) MODEL="${2:-}"; MODEL_CLI_SET=1; shift 2 ;;
+      --engine) export RALPH_ENGINE="${2:-}"; ENGINE_CLI_SET=1; shift 2 ;;
+      --ticket) TICKET="${2:-}"; shift 2 ;;
+      --timeout) TIMEOUT_SECONDS="${2:-}"; shift 2 ;;
+      --checkpoint) CHECKPOINT_MODE="${2:-}"; shift 2 ;;
+      --checkpoint-per-step) CHECKPOINT_PER_STEP="${2:-}"; shift 2 ;;
+      --list-engines) list_engines; exit 0 ;;
+      --dry-run) DRY_RUN=1; shift ;;
       --no-colors) NO_COLORS=1; shift ;;
+      --human-guard) HUMAN_GUARD="${2:-}"; shift 2 ;;
+      --human-guard-assume-yes) HUMAN_GUARD_ASSUME_YES="${2:-}"; shift 2 ;;
+      --human-guard-scope) HUMAN_GUARD_SCOPE="${2:-}"; shift 2 ;;
       --skip-git-repo-check) SKIP_GIT_CHECK=1; shift ;;
-      -h|--help) usage; exit 0 ;;
+      --version)
+        if command -v ralph_print_version >/dev/null 2>&1; then
+          ralph_print_version "${SCRIPT_DIR}"
+        else
+          echo "ralph ${RALPH_VERSION}"
+        fi
+        exit 0
+        ;;
+      --help) usage; exit 0 ;;
       *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
     esac
   done
 }
 
 validate_args() {
-  if ! [[ "${ITERATIONS}" =~ ^[0-9]+$ ]] || [[ "${ITERATIONS}" -lt 1 ]]; then
-    echo "--iterations must be a positive integer" >&2
-    exit 1
-  fi
-
-  if [[ -n "${TIMEOUT_SECONDS}" ]] && { ! [[ "${TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]] || [[ "${TIMEOUT_SECONDS}" -lt 0 ]]; }; then
-    echo "--timeout must be an integer >= 0" >&2
-    exit 1
-  fi
-
-  if [[ -z "${PROMPT}" ]]; then
-    echo "--prompt is required" >&2
-    exit 1
-  fi
-
-  if [[ -n "${MODEL}" ]] && [[ -z "${MODEL// }" ]]; then
-    echo "--model cannot be empty" >&2
-    exit 1
-  fi
-
-  if [[ -n "${PLAN_PATH}" ]]; then
-    if [[ ! -f "${PLAN_PATH}" ]]; then
-      echo "warning: --plan file not found, continuing without plan: ${PLAN_PATH}" >&2
-      PLAN_PATH=""
-    elif [[ ! -r "${PLAN_PATH}" ]]; then
-      echo "warning: --plan file is not readable, continuing without plan: ${PLAN_PATH}" >&2
-      PLAN_PATH=""
-    else
-      PLAN_CONTENT="$(cat "${PLAN_PATH}")"
-    fi
-  fi
-
+  # Set ROOT first (needed for find_ralph_dirs)
   if [[ -n "${WORKSPACE// }" ]]; then
     if [[ ! -d "${WORKSPACE}" ]]; then
       echo "ERROR: --workspace path not found or not a directory: ${WORKSPACE}" >&2
@@ -248,6 +958,231 @@ validate_args() {
     ROOT="${CALLER_ROOT}"
   fi
 
+  # Find .ralph directories and load profile
+  find_ralph_dirs
+  load_profile
+  load_core_libs
+  load_ui_helpers
+
+  # Apply profile defaults (CLI args override profile)
+  # MAX_STEPS=0 means "no limit" - run all pending steps
+  if [[ "${MAX_STEPS}" -eq 0 ]] && [[ -n "${PROFILE_STEPS}" ]]; then
+    MAX_STEPS="${PROFILE_STEPS}"
+  fi
+  if [[ -z "${MODEL}" ]] && [[ -n "${PROFILE_MODEL}" ]]; then
+    MODEL="${PROFILE_MODEL}"
+  fi
+  if [[ -z "${RALPH_ENGINE:-}" ]] && [[ -n "${PROFILE_ENGINE}" ]]; then
+    export RALPH_ENGINE="${PROFILE_ENGINE}"
+  fi
+  if [[ -z "${TIMEOUT_SECONDS}" ]] && [[ -n "${PROFILE_TIMEOUT}" ]]; then
+    TIMEOUT_SECONDS="${PROFILE_TIMEOUT}"
+  fi
+  if [[ "${SKIP_GIT_CHECK}" -eq 0 ]] && [[ "${PROFILE_SKIP_GIT_CHECK}" == "true" ]]; then
+    SKIP_GIT_CHECK=1
+  fi
+  if [[ -z "${TICKET}" ]] && [[ -n "${PROFILE_TICKET}" ]]; then
+    TICKET="${PROFILE_TICKET}"
+  fi
+
+  SOURCE_CONTROL_ENABLED="${RALPH_SOURCE_CONTROL_ENABLED:-${PROFILE_SOURCE_CONTROL_ENABLED:-1}}"
+  SOURCE_CONTROL_BACKEND="${RALPH_SOURCE_CONTROL_BACKEND:-${PROFILE_SOURCE_CONTROL_BACKEND:-auto}}"
+  SOURCE_CONTROL_ALLOW_COMMITS="${RALPH_SOURCE_CONTROL_ALLOW_COMMITS:-${PROFILE_SOURCE_CONTROL_ALLOW_COMMITS:-0}}"
+  SOURCE_CONTROL_BRANCH_PER_SESSION="${RALPH_SOURCE_CONTROL_BRANCH_PER_SESSION:-${PROFILE_SOURCE_CONTROL_BRANCH_PER_SESSION:-0}}"
+  SOURCE_CONTROL_BRANCH_NAME_TEMPLATE="${RALPH_SOURCE_CONTROL_BRANCH_NAME_TEMPLATE:-${PROFILE_SOURCE_CONTROL_BRANCH_NAME_TEMPLATE:-ralph/{ticket}/{goal_slug}/{session_id}}}"
+  SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH="${RALPH_SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH:-${PROFILE_SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH:-0}}"
+  ISSUES_PROVIDER="${RALPH_ISSUES_PROVIDER:-${PROFILE_ISSUES_PROVIDER:-none}}"
+  CHECKPOINT_ENABLED="${RALPH_CHECKPOINT_ENABLED:-${PROFILE_CHECKPOINT_ENABLED:-1}}"
+  CHECKPOINT_PER_STEP="${RALPH_CHECKPOINT_PER_STEP:-${PROFILE_CHECKPOINT_PER_STEP:-1}}"
+
+  if [[ -n "${CHECKPOINT_MODE}" ]]; then
+    case "$(printf '%s' "${CHECKPOINT_MODE}" | tr '[:upper:]' '[:lower:]')" in
+      off|0|false|no)
+        CHECKPOINT_ENABLED=0
+        CHECKPOINT_PER_STEP=0
+        ;;
+      pre)
+        CHECKPOINT_ENABLED=1
+        CHECKPOINT_PER_STEP=0
+        ;;
+      all|1|true|yes|on)
+        CHECKPOINT_ENABLED=1
+        CHECKPOINT_PER_STEP=1
+        ;;
+      *)
+        echo "--checkpoint must be one of: off, pre, all (or 0/1)" >&2
+        exit 1
+        ;;
+    esac
+  fi
+
+  # Human guard settings precedence: CLI > env > profile > default
+  [[ -z "${HUMAN_GUARD}" ]] && HUMAN_GUARD="${RALPH_HUMAN_GUARD:-${PROFILE_HUMAN_GUARD:-0}}"
+  [[ -z "${HUMAN_GUARD_ASSUME_YES}" ]] && HUMAN_GUARD_ASSUME_YES="${RALPH_HUMAN_GUARD_ASSUME_YES:-${PROFILE_HUMAN_GUARD_ASSUME_YES:-0}}"
+  [[ -z "${HUMAN_GUARD_SCOPE}" ]] && HUMAN_GUARD_SCOPE="${RALPH_HUMAN_GUARD_SCOPE:-${PROFILE_HUMAN_GUARD_SCOPE:-both}}"
+
+  case "${HUMAN_GUARD}" in
+    1|true|TRUE|yes|YES) HUMAN_GUARD=1 ;;
+    0|false|FALSE|no|NO) HUMAN_GUARD=0 ;;
+    *) echo "--human-guard must be 0/1 (or true/false)" >&2; exit 1 ;;
+  esac
+
+  case "${HUMAN_GUARD_ASSUME_YES}" in
+    1|true|TRUE|yes|YES) HUMAN_GUARD_ASSUME_YES=1 ;;
+    0|false|FALSE|no|NO) HUMAN_GUARD_ASSUME_YES=0 ;;
+    *) echo "--human-guard-assume-yes must be 0/1 (or true/false)" >&2; exit 1 ;;
+  esac
+
+  HUMAN_GUARD_SCOPE="$(printf '%s' "${HUMAN_GUARD_SCOPE}" | tr '[:upper:]' '[:lower:]')"
+  case "${HUMAN_GUARD_SCOPE}" in
+    session|step|both) ;;
+    *) echo "--human-guard-scope must be one of: session, step, both" >&2; exit 1 ;;
+  esac
+
+  SOURCE_CONTROL_BACKEND="$(printf '%s' "${SOURCE_CONTROL_BACKEND}" | tr '[:upper:]' '[:lower:]')"
+  case "${SOURCE_CONTROL_BACKEND}" in
+    auto|git|filesystem) ;;
+    *) echo "source_control_backend must be one of: auto, git, filesystem" >&2; exit 1 ;;
+  esac
+
+  ISSUES_PROVIDER="$(printf '%s' "${ISSUES_PROVIDER}" | tr '[:upper:]' '[:lower:]')"
+  case "${ISSUES_PROVIDER}" in
+    none|git|jira) ;;
+    *) echo "issues_provider must be one of: none, git, jira" >&2; exit 1 ;;
+  esac
+
+  case "${SOURCE_CONTROL_ENABLED}" in
+    1|true|TRUE|yes|YES) SOURCE_CONTROL_ENABLED=1 ;;
+    0|false|FALSE|no|NO) SOURCE_CONTROL_ENABLED=0 ;;
+    *) echo "source_control_enabled must be 0/1 (or true/false)" >&2; exit 1 ;;
+  esac
+  case "${SOURCE_CONTROL_ALLOW_COMMITS}" in
+    1|true|TRUE|yes|YES) SOURCE_CONTROL_ALLOW_COMMITS=1 ;;
+    0|false|FALSE|no|NO) SOURCE_CONTROL_ALLOW_COMMITS=0 ;;
+    *) echo "source_control_allow_commits must be 0/1 (or true/false)" >&2; exit 1 ;;
+  esac
+  case "${SOURCE_CONTROL_BRANCH_PER_SESSION}" in
+    1|true|TRUE|yes|YES) SOURCE_CONTROL_BRANCH_PER_SESSION=1 ;;
+    0|false|FALSE|no|NO) SOURCE_CONTROL_BRANCH_PER_SESSION=0 ;;
+    *) echo "source_control_branch_per_session must be 0/1 (or true/false)" >&2; exit 1 ;;
+  esac
+  case "${SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH}" in
+    1|true|TRUE|yes|YES) SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH=1 ;;
+    0|false|FALSE|no|NO) SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH=0 ;;
+    *) echo "source_control_require_ticket_for_branch must be 0/1 (or true/false)" >&2; exit 1 ;;
+  esac
+  case "${CHECKPOINT_ENABLED}" in
+    1|true|TRUE|yes|YES) CHECKPOINT_ENABLED=1 ;;
+    0|false|FALSE|no|NO) CHECKPOINT_ENABLED=0 ;;
+    *) echo "checkpoint_enabled must be 0/1 (or true/false)" >&2; exit 1 ;;
+  esac
+  case "${CHECKPOINT_PER_STEP}" in
+    1|true|TRUE|yes|YES) CHECKPOINT_PER_STEP=1 ;;
+    0|false|FALSE|no|NO) CHECKPOINT_PER_STEP=0 ;;
+    *) echo "checkpoint_per_step must be 0/1 (or true/false)" >&2; exit 1 ;;
+  esac
+
+  # Validate steps (0 = no limit, positive integer = limit)
+  if [[ -n "${MAX_STEPS}" ]] && ! [[ "${MAX_STEPS}" =~ ^[0-9]+$ ]]; then
+    echo "--steps must be a non-negative integer" >&2
+    exit 1
+  fi
+
+  # Validate timeout
+  if [[ -n "${TIMEOUT_SECONDS}" ]] && { ! [[ "${TIMEOUT_SECONDS}" =~ ^[0-9]+$ ]] || [[ "${TIMEOUT_SECONDS}" -lt 0 ]]; }; then
+    echo "--timeout must be an integer >= 0" >&2
+    exit 1
+  fi
+
+  # Goal is required
+  if [[ -z "${GOAL}" ]]; then
+    echo "--goal is required" >&2
+    exit 1
+  fi
+
+  # Model validation
+  if [[ -n "${MODEL}" ]] && [[ -z "${MODEL// }" ]]; then
+    echo "--model cannot be empty" >&2
+    exit 1
+  fi
+
+  # Resolve execution plan path.
+  # If --plan was not explicitly set, auto-select from .ralph/plans/*.json:
+  # - 0 plans: fallback to default plan.json path
+  # - 1 plan: auto-select it
+  # - >1 plans: reuse state last_plan_file when valid, else interactive select (TTY), else first plan
+  if [[ "${PLAN_CLI_SET}" -eq 1 ]]; then
+    PLAN_FILE_PATH="$(resolve_plan_file_path "${PLAN_FILE}")"
+  else
+    local -a plan_candidates=()
+    local p
+    while IFS= read -r p; do
+      [[ -n "${p}" ]] && plan_candidates+=("${p}")
+    done < <(list_plan_candidates)
+
+    if [[ "${#plan_candidates[@]}" -eq 0 ]]; then
+      PLAN_FILE_PATH="$(resolve_plan_file_path "${PLAN_FILE}")"
+    elif [[ "${#plan_candidates[@]}" -eq 1 ]]; then
+      PLAN_FILE_PATH="${plan_candidates[0]}"
+      echo "${C_CYAN}[session]${C_RESET} Auto-selected plan: $(to_rel_path "${PLAN_FILE_PATH}")"
+    else
+      local last_plan matched_plan
+      last_plan="$(state_get_last_plan)"
+      matched_plan=""
+      if [[ -n "${last_plan}" ]]; then
+        local last_plan_abs
+        last_plan_abs="$(state_plan_abs_path "${last_plan}")"
+        for p in "${plan_candidates[@]}"; do
+          if [[ "${p}" == "${last_plan_abs}" ]]; then
+            matched_plan="${p}"
+            break
+          fi
+        done
+      fi
+
+      if [[ -n "${matched_plan}" ]]; then
+        PLAN_FILE_PATH="${matched_plan}"
+        echo "${C_CYAN}[session]${C_RESET} Reusing last selected plan: $(to_rel_path "${PLAN_FILE_PATH}")"
+      else
+        PLAN_FILE_PATH="$(select_plan_interactive "${plan_candidates[@]}")"
+        if [[ "${PLAN_FILE_PATH}" == "__CREATE_NEW_PLAN__" ]]; then
+          local new_plan
+          new_plan="$(create_new_plan_from_prompt_interactive || true)"
+          if [[ -n "${new_plan}" ]]; then
+            PLAN_FILE_PATH="${new_plan}"
+            echo "${C_CYAN}[session]${C_RESET} Created and selected plan: $(to_rel_path "${PLAN_FILE_PATH}")"
+          else
+            PLAN_FILE_PATH="${plan_candidates[0]}"
+            echo "${C_YELLOW}[session]${C_RESET} Plan creation canceled; using: $(to_rel_path "${PLAN_FILE_PATH}")"
+          fi
+        else
+          echo "${C_CYAN}[session]${C_RESET} Selected plan: $(to_rel_path "${PLAN_FILE_PATH}")"
+        fi
+      fi
+    fi
+  fi
+  mkdir -p "$(dirname "${PLAN_FILE_PATH}")"
+  STATE_FILE_PATH="$(state_file_path)"
+  state_set_last_plan "${PLAN_FILE_PATH}"
+
+  # Resolve optional guide file (-G/--guide)
+  if [[ -n "${GUIDE_PATH}" ]]; then
+    GUIDE_PATH="${GUIDE_PATH/#\~/$HOME}"
+    if [[ "${GUIDE_PATH}" != /* ]]; then
+      GUIDE_PATH="${CALLER_ROOT}/${GUIDE_PATH}"
+    fi
+    if [[ ! -f "${GUIDE_PATH}" ]]; then
+      echo "warning: --guide file not found, continuing without guide: ${GUIDE_PATH}" >&2
+      GUIDE_PATH=""
+    elif [[ ! -r "${GUIDE_PATH}" ]]; then
+      echo "warning: --guide file is not readable, continuing without guide: ${GUIDE_PATH}" >&2
+      GUIDE_PATH=""
+    else
+      GUIDE_CONTENT="$(cat "${GUIDE_PATH}")"
+    fi
+  fi
+
+  # Check codex CLI
   if [[ "${DRY_RUN}" -ne 1 ]] && ! command -v codex >/dev/null 2>&1; then
     echo "ERROR: 'codex' is not installed or not available in PATH." >&2
     echo "Install/setup Codex CLI and try again:" >&2
@@ -255,7 +1190,7 @@ validate_args() {
     exit 1
   fi
 
-  [[ -z "${TIMEOUT_SECONDS}" ]] && TIMEOUT_SECONDS=0
+  [[ -z "${TIMEOUT_SECONDS}" ]] && TIMEOUT_SECONDS=0 || true
 }
 
 # =============================================================================
@@ -270,6 +1205,7 @@ setup_colors() {
     C_GREEN=$'\033[32m'
     C_YELLOW=$'\033[33m'
     C_BLUE=$'\033[34m'
+    C_MAGENTA=$'\033[35m'
     C_CYAN=$'\033[36m'
   fi
 }
@@ -310,14 +1246,13 @@ to_md_link() {
 # Session Setup
 # =============================================================================
 setup_session() {
-  local sessions_root="${ROOT}/sessions"
+  local sessions_root="${ROOT}/.ralph/sessions"
   mkdir -p "${sessions_root}"
 
   session_id="$(date +%Y%m%d_%H%M%S)_$$"
   session_dir="${sessions_root}/${session_id}"
   mkdir -p "${session_dir}"
 
-  last_response="${session_dir}/last_response.md"
   summary_md="${session_dir}/summary.md"
   prompt_input_file="${session_dir}/prompt_input.txt"
   iteration_stats_rows_file="${session_dir}/.iteration_stats_rows.tmp"
@@ -325,8 +1260,9 @@ setup_session() {
   session_start_epoch="$(date +%s)"
   session_start_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+  last_response="${session_dir}/.last_response.tmp"
   touch "${last_response}" "${iteration_stats_rows_file}" "${iteration_details_file}"
-  printf '%s\n' "${PROMPT}" > "${prompt_input_file}"
+  printf '%s\n' "${GOAL}" > "${prompt_input_file}"
 }
 
 write_summary_header() {
@@ -339,22 +1275,41 @@ write_summary_header() {
     echo "| session_id | ${session_id} |"
     echo "| repository | . |"
     echo "| runner | codex |"
+    echo "| engine_default | ${RALPH_ENGINE:-codex} |"
     echo "| model | ${MODEL:-default codex model} |"
-    echo "| iterations | ${ITERATIONS} |"
+    echo "| ticket | ${TICKET:-"(none)"} |"
+    echo "| issues_provider | ${ISSUES_PROVIDER} |"
+    echo "| source_control_enabled | ${SOURCE_CONTROL_ENABLED} |"
+    echo "| source_control_backend | ${SOURCE_CONTROL_BACKEND} |"
+    echo "| source_control_allow_commits | ${SOURCE_CONTROL_ALLOW_COMMITS} |"
+    echo "| source_control_branch_per_session | ${SOURCE_CONTROL_BRANCH_PER_SESSION} |"
+    echo "| source_control_branch_name_template | ${SOURCE_CONTROL_BRANCH_NAME_TEMPLATE} |"
+    echo "| source_control_require_ticket_for_branch | ${SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH} |"
+    echo "| checkpoint_enabled | ${CHECKPOINT_ENABLED} |"
+    echo "| checkpoint_per_step | ${CHECKPOINT_PER_STEP} |"
+    echo "| max_steps | $( [[ "${MAX_STEPS}" -eq 0 ]] && echo "unlimited" || echo "${MAX_STEPS}" ) |"
     echo "| prompt_file | $(to_md_link "${prompt_input_file}") |"
-    echo "| plan_file | ${PLAN_PATH:+$(to_md_link "${PLAN_PATH}")}${PLAN_PATH:-"(none)"} |"
+    echo "| plan_file | $(to_md_link "$(plan_json_path)") |"
+    echo "| guide_file | ${GUIDE_PATH:+$(to_md_link "${GUIDE_PATH}")}${GUIDE_PATH:-"(none)"} |"
     echo "| timeout_seconds | $( [[ "${TIMEOUT_SECONDS}" -gt 0 ]] && echo "${TIMEOUT_SECONDS}" || echo "disabled" ) |"
+    echo "| human_guard | ${HUMAN_GUARD} |"
+    echo "| human_guard_assume_yes | ${HUMAN_GUARD_ASSUME_YES} |"
+    echo "| human_guard_scope | ${HUMAN_GUARD_SCOPE} |"
     echo "| session_start_utc | ${session_start_iso} |"
     echo "| session_start_epoch | ${session_start_epoch} |"
     echo ""
-    echo "## Prompt"
+    echo "## Goal"
     echo ""
-    echo "${PROMPT}" | sed 's/^/> /'
+    echo "${GOAL}" | sed 's/^/> /'
     echo ""
-    if [[ -n "${PLAN_PATH}" ]]; then
-      echo "## Plan"
+    echo "## Plan"
+    echo ""
+    echo "Source: $(to_md_link "$(plan_json_path)")"
+    echo ""
+    if [[ -n "${GUIDE_PATH}" ]]; then
+      echo "## Guide"
       echo ""
-      echo "Source: $(to_md_link "${PLAN_PATH}")"
+      echo "Source: $(to_md_link "${GUIDE_PATH}")"
       echo ""
     fi
   } > "${summary_md}"
@@ -363,23 +1318,128 @@ write_summary_header() {
 # =============================================================================
 # Engine Command
 # =============================================================================
-run_engine_command() {
-  local cmd="$1"
-  local engine_log="$2"
-  local i="$3"
+# =============================================================================
+# AI Engine Execution
+# =============================================================================
 
+# Run AI engine via hook or built-in fallback
+# Usage: run_ai_engine <prompt_file> <response_file> <engine_log> <iteration>
+run_ai_engine() {
+  local prompt_file="$1"
+  local response_file="$2"
+  local engine_log="$3"
+  local i="$4"
+
+  # Check for ai hook
+  local ai_hook
+  ai_hook=$(resolve_hook "ai")
+
+  if [[ -n "${ai_hook}" ]]; then
+    # Use ai hook
+    echo "${C_MAGENTA}[ai]${C_RESET}"
+    run_ai_hook "${ai_hook}" "${prompt_file}" "${response_file}" "${engine_log}" "${i}"
+  else
+    # Fallback to built-in codex
+    run_builtin_codex "${prompt_file}" "${response_file}" "${engine_log}" "${i}"
+  fi
+}
+
+# Run AI via hook
+run_ai_hook() {
+  local hook_path="$1"
+  local prompt_file="$2"
+  local response_file="$3"
+  local engine_log="$4"
+  local i="$5"
+  local hook_depth="${RALPH_HOOK_DEPTH:-0}"
+
+  # Export environment for hook
+  export RALPH_PROMPT_FILE="${prompt_file}"
+  export RALPH_RESPONSE_FILE="${response_file}"
+  export RALPH_ENGINE="${ACTIVE_ENGINE:-${RALPH_ENGINE:-codex}}"
+  export RALPH_SESSION_ID="${session_id}"
+  export RALPH_SESSION_DIR="${session_dir}"
+  export RALPH_WORKSPACE="${ROOT}"
+  export RALPH_MODEL="${ACTIVE_MODEL:-${MODEL:-}}"
+  export RALPH_TIMEOUT="${TIMEOUT_SECONDS:-0}"
+  export RALPH_DRY_RUN="${DRY_RUN}"
+  export RALPH_STEP="${i}"
+
+  # ai.sh handles dry-run internally (uses mock engine)
+  if [[ "${TIMEOUT_SECONDS}" -gt 0 ]] && [[ "${DRY_RUN}" -ne 1 ]]; then
+    set +e
+    timeout "${TIMEOUT_SECONDS}" env RALPH_HOOK_DEPTH="$((hook_depth + 1))" "${hook_path}" >> "${engine_log}" 2>&1
+    local rc=$?
+    set -e
+    [[ "${rc}" -eq 124 ]] && echo "ai hook timed out after ${TIMEOUT_SECONDS}s" >&2
+    return "${rc}"
+  fi
+
+  env RALPH_HOOK_DEPTH="$((hook_depth + 1))" "${hook_path}" >> "${engine_log}" 2>&1
+}
+
+# Built-in codex execution (fallback when no ai hook)
+run_builtin_codex() {
+  local prompt_file="$1"
+  local response_file="$2"
+  local engine_log="$3"
+  local i="$4"
+
+  # Dry-run: generate mock response
   if [[ "${DRY_RUN}" -eq 1 ]]; then
-    echo "[dry-run] ${cmd}" >> "${engine_log}"
-    echo "[${i}/${ITERATIONS}] dry-run enabled, skipping execution"
+    echo "[ai] Engine: mock (built-in dry-run)" >> "${engine_log}"
+    echo "[ai] Prompt: ${prompt_file}" >> "${engine_log}"
+
+    local prompt_preview timestamp
+    prompt_preview=$(head -c 200 "${prompt_file}" | tr '\n' ' ')
+    timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+    cat > "${response_file}" <<EOF
+##### Mock AI Response (Built-in)
+
+**Generated:** ${timestamp}
+**Engine:** mock (built-in fallback)
+**Step:** ${i}/${total_steps}
+
+---
+
+##### Summary
+
+This is a simulated response from the built-in mock engine.
+
+**Prompt preview:**
+> ${prompt_preview}...
+
+##### Actions Taken
+
+- [mock] Analyzed prompt
+- [mock] Simulated processing
+- [mock] Generated placeholder response
+
+---
+
+*Generated by built-in mock for dry-run testing.*
+EOF
+
+    echo "[ai] Mock response: ${response_file}" >> "${engine_log}"
+    echo "dry-run: mock response generated"
     return 0
   fi
+
+  # Real execution
+  local skip_flag=""
+  [[ "${SKIP_GIT_CHECK}" -eq 1 ]] && skip_flag="--skip-git-repo-check "
+  local selected_model="${ACTIVE_MODEL:-${MODEL:-}}"
+
+  local cmd="codex exec --full-auto ${skip_flag}-C ${ROOT} -o ${response_file} - < ${prompt_file}"
+  [[ -n "${selected_model}" ]] && cmd="codex exec --full-auto ${skip_flag}-C ${ROOT} --model ${selected_model} -o ${response_file} - < ${prompt_file}"
 
   if [[ "${TIMEOUT_SECONDS}" -gt 0 ]]; then
     set +e
     timeout "${TIMEOUT_SECONDS}" bash -lc "${cmd}" >> "${engine_log}" 2>&1
     local rc=$?
     set -e
-    [[ "${rc}" -eq 124 ]] && echo "[${i}/${ITERATIONS}] command timed out after ${TIMEOUT_SECONDS}s" >&2
+    [[ "${rc}" -eq 124 ]] && echo "command timed out after ${TIMEOUT_SECONDS}s" >&2
     return "${rc}"
   fi
 
@@ -392,23 +1452,40 @@ run_engine_command() {
 build_prompt() {
   local i="$1"
   local prompt_file="$2"
+  local step_id="${3:-}"
+  local step_desc="${4:-}"
+  local step_accept="${5:-}"
 
   {
     echo "You are running iterative self-correction in repository: ${ROOT}"
     echo ""
-    echo "Primary objective:"
-    echo "${PROMPT}"
-    if [[ -n "${PLAN_PATH}" ]]; then
+
+    # If we have a plan step, use it as the focus
+    if [[ -n "${step_id}" ]]; then
+      local plan_goal
+      plan_goal=$(get_plan_goal)
+      echo "Overall goal: ${plan_goal:-${GOAL}}"
       echo ""
-      echo "Plan file: $(to_rel_path "${PLAN_PATH}")"
-      echo "${PLAN_CONTENT}"
+      echo "Current step: ${step_id}"
+      echo "Task: ${step_desc}"
+      echo "Acceptance criteria: ${step_accept}"
+    else
+      echo "Primary objective:"
+      echo "${GOAL}"
+    fi
+
+    if [[ -n "${GUIDE_PATH}" ]]; then
+      echo ""
+      echo "Guide file: $(to_rel_path "${GUIDE_PATH}")"
+      echo "${GUIDE_CONTENT}"
     fi
     echo ""
     echo "Constraints:"
     echo "1. Apply concrete edits directly in repo files when useful."
     echo "2. Keep changes coherent and minimal per iteration."
-    echo "3. At the end of this iteration, write a summary in English using markdown formatting."
-    echo "4. Use headings (##### level), bullet points, and bold text for structure."
+    echo "3. Focus ONLY on the current step. Do not work ahead."
+    echo "4. At the end of this iteration, write a summary in English using markdown formatting."
+    echo "5. Use headings (##### level), bullet points, and bold text for structure."
     echo ""
     echo "Previous iteration output (if any):"
     cat "${last_response}"
@@ -417,17 +1494,39 @@ build_prompt() {
 
 print_iteration_header() {
   local i="$1"
+  local total="${2:-${MAX_STEPS}}"
+  local step_id="${3:-}"
+  local display_engine="${4:-${ACTIVE_ENGINE:-${RALPH_ENGINE:-codex}}}"
+  local display_model="${5:-${ACTIVE_MODEL:-}}"
+  local mode_label mode_value timeout_value
 
   echo ""
   echo "${C_DIM}================================================================${C_RESET}"
-  echo "${C_BOLD}${C_CYAN} RALPH LOOP ITERATION ${i}/${ITERATIONS}${C_RESET}"
+  if [[ -n "${step_id}" ]]; then
+    echo "${C_BOLD}${C_CYAN} RALPH STEP ${i}/${total}: ${step_id}${C_RESET}"
+  else
+    echo "${C_BOLD}${C_CYAN} RALPH ITERATION ${i}/${total}${C_RESET}"
+  fi
   echo "${C_DIM}================================================================${C_RESET}"
 
-  echo "${C_BLUE}[${i}/${ITERATIONS}]${C_RESET} runner=codex"
-  echo "${C_BLUE}[${i}/${ITERATIONS}]${C_RESET} prompt=${PROMPT}"
-  [[ -n "${MODEL}" ]] && echo "${C_BLUE}[${i}/${ITERATIONS}]${C_RESET} model=${MODEL}"
-  [[ -n "${PLAN_PATH}" ]] && echo "${C_BLUE}[${i}/${ITERATIONS}]${C_RESET} plan_file=$(to_rel_path "${PLAN_PATH}")"
-  echo "${C_BLUE}[${i}/${ITERATIONS}]${C_RESET} timeout=$( [[ "${TIMEOUT_SECONDS}" -gt 0 ]] && echo "${TIMEOUT_SECONDS}s" || echo "disabled" )"
+  if [[ -n "${step_id}" ]]; then
+    mode_label="step"
+    mode_value="${step_id}"
+  else
+    mode_label="goal"
+    mode_value="${GOAL}"
+  fi
+  timeout_value="$( [[ "${TIMEOUT_SECONDS}" -gt 0 ]] && echo "${TIMEOUT_SECONDS}s" || echo "disabled" )"
+
+  echo "${C_DIM}+--------------------------------------------------------------+${C_RESET}"
+  echo "${C_DIM}|${C_RESET} engine=${display_engine}"
+  echo "${C_DIM}|${C_RESET} ${mode_label}=${mode_value}"
+  [[ -n "${display_model}" ]] && echo "${C_DIM}|${C_RESET} model=${display_model}"
+  echo "${C_DIM}|${C_RESET} plan_file=$(to_rel_path "$(plan_json_path)")"
+  [[ -n "${GUIDE_PATH}" ]] && echo "${C_DIM}|${C_RESET} guide_file=$(to_rel_path "${GUIDE_PATH}")"
+  echo "${C_DIM}|${C_RESET} timeout=${timeout_value}"
+  echo "${C_DIM}+--------------------------------------------------------------+${C_RESET}"
+
 }
 
 check_iteration_errors() {
@@ -442,17 +1541,18 @@ check_iteration_errors() {
   if grep -qi "usage limit\|hit your.*limit\|rate limit" "${engine_log}" 2>/dev/null; then
     error_type="usage_limit"
     error_hint="Check your plan or wait for quota reset"
-    echo "${C_RED}[${i}/${ITERATIONS}] ERROR: API usage limit reached${C_RESET}" >&2
-    echo "${C_YELLOW}[${i}/${ITERATIONS}] ${error_hint}${C_RESET}" >&2
+    echo "${C_RED}ERROR: API usage limit reached${C_RESET}" >&2
+    echo "${C_YELLOW}${error_hint}${C_RESET}" >&2
   fi
 
   if grep -qi "unauthorized\|authentication\|auth.*fail\|invalid.*key\|API key" "${engine_log}" 2>/dev/null; then
     error_type="auth_failed"
     error_hint="Run 'codex' interactively to re-authenticate"
-    echo "${C_RED}[${i}/${ITERATIONS}] ERROR: Authentication failed${C_RESET}" >&2
-    echo "${C_YELLOW}[${i}/${ITERATIONS}] ${error_hint}${C_RESET}" >&2
+    echo "${C_RED}ERROR: Authentication failed${C_RESET}" >&2
+    echo "${C_YELLOW}${error_hint}${C_RESET}" >&2
   fi
 }
+
 
 collect_response_stats() {
   local i="$1"
@@ -470,7 +1570,7 @@ collect_response_stats() {
     response_chars=0
     detected_tokens=""
     if [[ "${DRY_RUN}" -ne 1 ]] && [[ "${rc}" -eq 0 ]]; then
-      echo "${C_YELLOW}[${i}/${ITERATIONS}] WARNING: Empty response from codex${C_RESET}" >&2
+      echo "${C_YELLOW}[${i}/${total_steps}] WARNING: Empty response from codex${C_RESET}" >&2
     fi
   fi
 
@@ -490,23 +1590,26 @@ collect_response_stats() {
 write_iteration_details() {
   local i="$1"
   local prompt_file="$2"
-  local engine_log="$3"
-  local rc="$4"
-  local iter_start_iso="$5"
-  local iter_end_iso="$6"
-  local iter_duration_sec="$7"
+  local response_file="$3"
+  local engine_log="$4"
+  local rc="$5"
+  local iter_start_iso="$6"
+  local iter_end_iso="$7"
+  local iter_duration_sec="$8"
+  local total_steps="${9:-?}"
 
   # Stats row
-  echo "| ${i}/${ITERATIONS} | ${iter_start_iso} | ${iter_end_iso} | ${iter_duration_sec} | ${rc} | ${result_label} | ${response_lines} | ${response_words} | ${response_chars} | ${tokens_label} |" >> "${iteration_stats_rows_file}"
+  echo "| ${i}/${total_steps} | ${iter_start_iso} | ${iter_end_iso} | ${iter_duration_sec} | ${rc} | ${result_label} | ${response_lines} | ${response_words} | ${response_chars} | ${tokens_label} |" >> "${iteration_stats_rows_file}"
 
   # Details
   {
     echo ""
-    echo "### Iteration ${i}/${ITERATIONS}"
+    echo "### Step ${i}/${total_steps}"
     echo ""
     echo "| Metric | Value |"
     echo "|---|---|"
     echo "| prompt_file | $(to_md_link "${prompt_file}") |"
+    echo "| response_file | $(to_md_link "${response_file}") |"
     echo "| engine_file | $(to_md_link "${engine_log}") |"
     echo "| status | ${rc} |"
     echo "| result | ${result_label} |"
@@ -530,50 +1633,155 @@ write_iteration_details() {
 
 run_iteration() {
   local i="$1"
+  local step_id="${2:-}"
+  local step_desc="${3:-}"
+  local step_accept="${4:-}"
   local prompt_file="${session_dir}/prompt_${i}.txt"
+  local response_file="${session_dir}/response_${i}.md"
   local engine_log="${session_dir}/engine_${i}.md"
+  local step_change_marker="${session_dir}/.step_${i}.start"
+  local max_retries=3
+  local retry_count=0
+  local hook_rc
+  local total_steps="${MAX_STEPS}"
+  local change_log_file="${session_dir}/changes_step_${i}.md"
 
-  print_iteration_header "${i}"
-  build_prompt "${i}" "${prompt_file}"
+  touch "${step_change_marker}"
 
-  # Build command
-  local skip_flag=""
-  [[ "${SKIP_GIT_CHECK}" -eq 1 ]] && skip_flag="--skip-git-repo-check "
+  # If plan-driven, show step info in header
+  if [[ -n "${step_id}" ]]; then
+    total_steps=$(get_step_count)
+  elif [[ "${total_steps}" -eq 0 ]]; then
+    total_steps="?"  # Unknown total for unlimited iteration mode
+  fi
 
-  local cmd="codex exec --full-auto ${skip_flag}-C ${ROOT} -o ${last_response} - < ${prompt_file}"
-  [[ -n "${MODEL}" ]] && cmd="codex exec --full-auto ${skip_flag}-C ${ROOT} --model ${MODEL} -o ${last_response} - < ${prompt_file}"
+  resolve_agent_for_step "${step_id}" "${step_desc}"
+  print_iteration_header "${i}" "${total_steps}" "${step_id}" "${ACTIVE_ENGINE}" "${ACTIVE_MODEL}"
 
-  local display_cmd="codex exec --full-auto ${skip_flag}-C . -o $(to_rel_path "${last_response}") - < $(to_rel_path "${prompt_file}")"
-  [[ -n "${MODEL}" ]] && display_cmd="codex exec --full-auto ${skip_flag}-C . --model ${MODEL} -o $(to_rel_path "${last_response}") - < $(to_rel_path "${prompt_file}")"
+  # Mark step as in_progress if plan-driven
+  if [[ -n "${step_id}" ]]; then
+    update_step_status "${step_id}" "in_progress"
+  fi
 
-  echo "${C_BLUE}[${i}/${ITERATIONS}]${C_RESET} command: ${display_cmd}"
-
-  # Run
-  local iter_start_epoch iter_start_iso iter_end_epoch iter_end_iso iter_duration_sec rc
-  iter_start_epoch="$(date +%s)"
-  iter_start_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
+  # Hook: before-step
   set +e
-  run_engine_command "${cmd}" "${engine_log}" "${i}"
-  rc=$?
+  run_hook "before-step" "${i}"
+  hook_rc=$?
   set -e
-
-  iter_end_epoch="$(date +%s)"
-  iter_end_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  iter_duration_sec=$((iter_end_epoch - iter_start_epoch))
-
-  # Process results
-  check_iteration_errors "${i}" "${engine_log}"
-  collect_response_stats "${i}" "${engine_log}" "${rc}"
-  write_iteration_details "${i}" "${prompt_file}" "${engine_log}" "${rc}" "${iter_start_iso}" "${iter_end_iso}" "${iter_duration_sec}"
-
-  # Print iteration duration
-  echo "${C_BLUE}[${i}/${ITERATIONS}]${C_RESET} duration: ${C_CYAN}${iter_duration_sec}s${C_RESET}"
-
-  if [[ "${rc}" -ne 0 ]]; then
-    echo "${C_RED}[${i}/${ITERATIONS}] iteration failed with status ${rc}${C_RESET}" >&2
+  if [[ "${hook_rc}" -eq 1 ]]; then
+    echo "${C_RED}before-step hook failed${C_RESET}" >&2
+    run_hook "on-error" "${i}" "${hook_rc}"
     return 1
   fi
+
+  # Retry loop for quality-gate exit code 3
+  while true; do
+    build_prompt "${i}" "${prompt_file}" "${step_id}" "${step_desc}" "${step_accept}"
+
+    # Show what we're about to run
+    local engine_name="${ACTIVE_ENGINE:-${RALPH_ENGINE:-codex}}"
+    local ai_hook
+    ai_hook=$(resolve_hook "ai")
+    [[ -n "${ai_hook}" ]] && engine_name="${ACTIVE_ENGINE:-${RALPH_ENGINE:-codex}} (via hook)"
+
+    echo "${C_BLUE}engine${C_RESET}: ${engine_name}"
+    echo "${C_BLUE}prompt${C_RESET}: $(to_rel_path "${prompt_file}")"
+
+    # Run AI engine
+    local iter_start_epoch iter_start_iso iter_end_epoch iter_end_iso iter_duration_sec rc
+    iter_start_epoch="$(date +%s)"
+    iter_start_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+    set +e
+    run_ai_engine "${prompt_file}" "${response_file}" "${engine_log}" "${i}"
+    rc=$?
+    set -e
+
+    if [[ -f "${response_file}" ]]; then
+      last_response="${response_file}"
+    fi
+
+    iter_end_epoch="$(date +%s)"
+    iter_end_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    iter_duration_sec=$((iter_end_epoch - iter_start_epoch))
+
+    # Process results
+    check_iteration_errors "${i}" "${engine_log}"
+    collect_response_stats "${i}" "${engine_log}" "${rc}"
+    write_iteration_details "${i}" "${prompt_file}" "${response_file}" "${engine_log}" "${rc}" "${iter_start_iso}" "${iter_end_iso}" "${iter_duration_sec}" "${total_steps}"
+
+    # Print iteration duration
+    echo "${C_BLUE}duration${C_RESET}: ${C_CYAN}${iter_duration_sec}s${C_RESET}"
+
+    if [[ "${rc}" -ne 0 ]]; then
+      echo "${C_RED}engine failed with status ${rc}${C_RESET}" >&2
+      run_hook "on-error" "${i}" "${rc}"
+      return 1
+    fi
+
+    # Hook: quality-gate
+    set +e
+    run_hook "quality-gate" "${i}" "${rc}"
+    hook_rc=$?
+    set -e
+
+    case "${hook_rc}" in
+      0)
+        # Success, continue
+        break
+        ;;
+      1)
+        # Hard failure
+        echo "${C_RED}quality-gate failed${C_RESET}" >&2
+        run_hook "on-error" "${i}" "${hook_rc}"
+        return 1
+        ;;
+      2)
+        # Replan required - for now treat as failure (planning hook not yet implemented)
+        echo "${C_YELLOW}quality-gate requested replan (not implemented, treating as failure)${C_RESET}" >&2
+        run_hook "on-error" "${i}" "${hook_rc}"
+        return 1
+        ;;
+      3)
+        # Retry step
+        ((retry_count++))
+        if [[ "${retry_count}" -ge "${max_retries}" ]]; then
+          echo "${C_RED}quality-gate retry limit reached (${max_retries})${C_RESET}" >&2
+          run_hook "on-error" "${i}" "${hook_rc}"
+          return 1
+        fi
+        echo "${C_YELLOW}quality-gate requested retry (${retry_count}/${max_retries})${C_RESET}"
+        continue
+        ;;
+      *)
+        # Unknown exit code, fail hard
+        echo "${C_RED}quality-gate returned unknown exit code ${hook_rc}${C_RESET}" >&2
+        run_hook "on-error" "${i}" "${hook_rc}"
+        return 1
+        ;;
+    esac
+  done
+
+  # Hook: after-step
+  set +e
+  run_hook "after-step" "${i}" "0"
+  hook_rc=$?
+  set -e
+  if [[ "${hook_rc}" -eq 1 ]]; then
+    echo "${C_RED}after-step hook failed${C_RESET}" >&2
+    run_hook "on-error" "${i}" "${hook_rc}"
+    return 1
+  fi
+
+  if [[ -f "${change_log_file}" ]]; then
+    {
+      echo ""
+      echo "#### Change Log"
+      echo ""
+      echo "- file: $(to_md_link "${change_log_file}")"
+    } >> "${iteration_details_file}"
+  fi
+
   return 0
 }
 
@@ -608,8 +1816,17 @@ finalize_summary() {
 }
 
 print_completion() {
+  local completed="${1:-0}"
   echo ""
-  echo "${C_BOLD}${C_GREEN}Ralph loop completed (${ITERATIONS} iterations) in ${C_CYAN}${total_duration_sec}s${C_GREEN}${C_RESET}"
+  if plan_exists; then
+    local total pending
+    total=$(get_step_count)
+    pending=$(get_pending_count)
+    echo "${C_BOLD}${C_GREEN}Ralph completed (${completed}/${total} steps) in ${C_CYAN}${total_duration_sec}s${C_GREEN}${C_RESET}"
+    [[ "${pending}" -gt 0 ]] && echo "${C_YELLOW}Remaining: ${pending} steps pending${C_RESET}"
+  else
+    echo "${C_BOLD}${C_GREEN}Ralph completed (${completed} step(s)) in ${C_CYAN}${total_duration_sec}s${C_GREEN}${C_RESET}"
+  fi
   echo "${C_GREEN}Session files:${C_RESET} $(to_rel_path "${session_dir}")"
   echo "${C_GREEN}Summary file:${C_RESET} $(to_rel_path "${summary_md}")"
 }
@@ -625,14 +1842,92 @@ main() {
   setup_session
   write_summary_header
 
-  for ((i=1; i<=ITERATIONS; i++)); do
-    if ! run_iteration "${i}"; then
-      break
+  # Hook: before-session
+  local hook_rc
+  set +e
+  run_hook "before-session"
+  hook_rc=$?
+  set -e
+  if [[ "${hook_rc}" -eq 1 ]]; then
+    echo "${C_RED}[session] before-session hook failed, aborting${C_RESET}" >&2
+    finalize_summary
+    exit 1
+  fi
+
+  local session_failed=0
+  local completed_steps=0
+
+  # Check if plan-driven mode (plan.json exists after before-session)
+  if plan_exists; then
+    echo "${C_CYAN}[session]${C_RESET} Plan-driven mode: $(plan_json_path)"
+    local pending_count
+    pending_count=$(get_pending_count)
+    echo "${C_CYAN}[session]${C_RESET} Pending steps: ${pending_count}"
+
+    local i=1
+    # MAX_STEPS=0 means no limit (run all pending)
+    # MAX_STEPS>0 means run up to that many steps
+    local step_limit="${MAX_STEPS}"
+    [[ "${step_limit}" -eq 0 ]] && step_limit=999999  # Effectively unlimited
+
+    while [[ "${i}" -le "${step_limit}" ]]; do
+      # Get next pending step
+      local step_json step_id step_desc step_accept
+      step_json=$(get_current_step)
+
+      # No more pending steps
+      if [[ -z "${step_json}" ]]; then
+        echo "${C_GREEN}[session]${C_RESET} All plan steps completed"
+        break
+      fi
+
+      step_id=$(echo "${step_json}" | jq -r '.id')
+      step_desc=$(echo "${step_json}" | jq -r '.description')
+      step_accept=$(echo "${step_json}" | jq -r '.acceptance')
+
+      if ! run_iteration "${i}" "${step_id}" "${step_desc}" "${step_accept}"; then
+        session_failed=1
+        break
+      fi
+
+      # Mark step as completed
+      update_step_status "${step_id}" "completed"
+      ((completed_steps++)) || true
+      ((i++))
+    done
+
+    # Check if we hit step limit before completing all steps
+    pending_count=$(get_pending_count)
+    if [[ "${pending_count}" -gt 0 ]] && [[ "${session_failed}" -eq 0 ]] && [[ "${MAX_STEPS}" -gt 0 ]]; then
+      echo "${C_YELLOW}[session]${C_RESET} Step limit (${MAX_STEPS}) reached, ${pending_count} steps remaining"
     fi
-  done
+  else
+    # Fallback: iteration-based mode (no plan)
+    # MAX_STEPS=0 defaults to 1 step in this mode
+    local num_steps="${MAX_STEPS}"
+    [[ "${num_steps}" -eq 0 ]] && num_steps=1
+
+    echo "${C_CYAN}[session]${C_RESET} Iteration mode: ${num_steps} step(s)"
+
+    for ((i=1; i<=num_steps; i++)); do
+      if ! run_iteration "${i}"; then
+        session_failed=1
+        break
+      fi
+      ((completed_steps++)) || true
+    done
+  fi
+
+  # Hook: after-session
+  set +e
+  run_hook "after-session"
+  set -e
 
   finalize_summary
-  print_completion
+  print_completion "${completed_steps}"
+
+  [[ "${session_failed}" -eq 1 ]] && exit 1
+  exit 0
 }
 
 main "$@"
