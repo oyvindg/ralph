@@ -3,5 +3,11 @@
   "wizard.workflow.coding": "Coding",
   "wizard.workflow.project_management": "Project Management",
   "wizard.workflow.finance": "Finance",
-  "wizard.workflow.non_code": "Non-code"
+  "wizard.workflow.non_code": "Non-code",
+  "plan.overwrite.prompt": "Plan already exists. Choose action:",
+  "plan.overwrite.yes": "Overwrite existing plan",
+  "plan.overwrite.no": "Cancel",
+  "human.gate.prompt": "Approve action:",
+  "human.gate.approve": "Approve and continue",
+  "human.gate.reject": "Reject and stop"
 }

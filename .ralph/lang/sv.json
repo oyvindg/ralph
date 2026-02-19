@@ -3,5 +3,11 @@
   "wizard.workflow.coding": "Kodning",
   "wizard.workflow.project_management": "Projektledning",
   "wizard.workflow.finance": "Finans",
-  "wizard.workflow.non_code": "Icke-kod"
+  "wizard.workflow.non_code": "Icke-kod",
+  "plan.overwrite.prompt": "Planen finns redan. Välj åtgärd:",
+  "plan.overwrite.yes": "Skriv över befintlig plan",
+  "plan.overwrite.no": "Avbryt",
+  "human.gate.prompt": "Godkänn åtgärd:",
+  "human.gate.approve": "Godkänn och fortsätt",
+  "human.gate.reject": "Avvisa och stoppa"
 }

@@ -99,3 +99,11 @@ get_plan_goal() {
   [[ -f "${plan_file}" ]] || return
   jq -r '.goal // empty' "${plan_file}" 2>/dev/null
 }
+
+# Returns per-plan execution limit (0 means unlimited / not set).
+get_plan_max_steps() {
+  local plan_file
+  plan_file="$(plan_json_path)"
+  [[ -f "${plan_file}" ]] || { echo "0"; return; }
+  jq -r 'if (.max_steps // 0) | type == "number" then (.max_steps // 0) else 0 end' "${plan_file}" 2>/dev/null || echo "0"
+}

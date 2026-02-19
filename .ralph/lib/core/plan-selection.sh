@@ -38,7 +38,7 @@ select_plan_interactive() {
 create_new_plan_from_prompt_interactive() {
   [[ -t 0 ]] || return 1
 
-  local default_name plan_name goal_prompt plan_path now
+  local default_name plan_name goal_prompt plan_path now max_steps
   default_name="plan-$(date +%Y%m%d_%H%M%S).json"
 
   read -r -p "New plan file name (.ralph/plans, default: ${default_name}): " plan_name
@@ -49,22 +49,26 @@ create_new_plan_from_prompt_interactive() {
   mkdir -p "$(dirname "${plan_path}")"
 
   if [[ -f "${plan_path}" ]]; then
-    local overwrite
-    read -r -p "Plan already exists (${plan_name}). Overwrite? [y/N]: " overwrite
-    case "${overwrite}" in
-      y|Y|yes|YES) ;;
-      *) return 1 ;;
-    esac
+    if ! confirm_plan_overwrite "${plan_path}" "${plan_name}"; then
+      return 1
+    fi
   fi
 
   read -r -p "Plan goal/prompt (default: ${GOAL}): " goal_prompt
   [[ -z "${goal_prompt}" ]] && goal_prompt="${GOAL}"
+  read -r -p "Plan max steps per session (0=unlimited, default: 0): " max_steps
+  [[ -z "${max_steps}" ]] && max_steps="0"
+  if ! [[ "${max_steps}" =~ ^[0-9]+$ ]]; then
+    echo "Invalid max steps value. Must be a non-negative integer." >&2
+    return 1
+  fi
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
   if command -v jq >/dev/null 2>&1; then
-    jq -n --arg goal "${goal_prompt}" --arg now "${now}" '
+    jq -n --arg goal "${goal_prompt}" --arg now "${now}" --argjson max_steps "${max_steps}" '
       {
         goal: $goal,
+        max_steps: $max_steps,
         steps: [
           {
             id: "step-1-scan",
@@ -128,4 +132,36 @@ JSON
   fi
 
   printf '%s\n' "${plan_path}"
+}
+
+# Confirms overwrite via hooks.json event `before-session.plan-overwrite-confirm`.
+# Returns 0 when overwrite is approved, 1 otherwise.
+confirm_plan_overwrite() {
+  local plan_path="$1"
+  local plan_name="$2"
+
+  if ! command -v run_json_hook_commands >/dev/null 2>&1; then
+    echo "Plan overwrite confirmation requires hooks parser (run_json_hook_commands missing)." >&2
+    return 1
+  fi
+  if [[ -z "${HOOKS_JSON_PATH:-}" || ! -f "${HOOKS_JSON_PATH}" ]]; then
+    echo "Plan overwrite confirmation requires hooks.json (HOOKS_JSON_PATH missing)." >&2
+    return 1
+  fi
+
+  if ! jq -e '
+    .["before-session"]?["plan-overwrite-confirm"] as $node
+    | if $node == null then false
+      elif ($node|type) == "array" then ($node|length) > 0
+      elif ($node|type) == "object" then (($node.commands // [])|length) > 0
+      else false end
+  ' "${HOOKS_JSON_PATH}" >/dev/null 2>&1; then
+    echo "hooks.json must define before-session.plan-overwrite-confirm." >&2
+    return 1
+  fi
+
+  export RALPH_PLAN_SELECT_MODE="overwrite"
+  export RALPH_PLAN_CANDIDATE="${plan_path}"
+  export RALPH_PLAN_CANDIDATE_NAME="${plan_name}"
+  run_json_hook_commands "before-session" "plan-overwrite-confirm" "" ""
 }

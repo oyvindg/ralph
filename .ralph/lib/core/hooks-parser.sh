@@ -2,6 +2,23 @@
 # hooks.json command runner with optional human-in-the-loop gates.
 set -euo pipefail
 
+# Loads shared JSON/JSONC helpers.
+HOOKS_PARSER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+JSON_LIB_PATH="${HOOKS_PARSER_DIR}/../json.sh"
+if [[ -f "${JSON_LIB_PATH}" ]]; then
+  # shellcheck disable=SC1090
+  source "${JSON_LIB_PATH}"
+else
+  echo "Missing JSON helper library: ${JSON_LIB_PATH}" >&2
+  return 1 2>/dev/null || exit 1
+fi
+
+# Color defaults for early-stage execution (before setup_colors).
+: "${C_RESET:=}"
+: "${C_DIM:=}"
+: "${C_YELLOW:=}"
+: "${C_MAGENTA:=}"
+
 # Resolves language file path by precedence: project -> global -> bundled.
 json_hook_lang_file_path() {
   local lang_code="${1:-en}"
@@ -526,6 +543,9 @@ hooks_json_collect_files() {
   _RALPH_HOOKS_JSON_VISITING["${hooks_file}"]=1
 
   local include_rel include_abs
+  local normalized
+  normalized="$(json_like_to_temp_file "${hooks_file}")"
+
   while IFS= read -r include_rel; do
     [[ -n "${include_rel}" ]] || continue
     include_abs="$(hooks_json_resolve_include_path "${hooks_file}" "${include_rel}")"
@@ -534,8 +554,9 @@ hooks_json_collect_files() {
     jq -r '
       (.include // .includes // empty)
       | if type == "array" then .[] elif type == "string" then . else empty end
-    ' "${hooks_file}" 2>/dev/null || true
+    ' "${normalized}" 2>/dev/null || true
   )
+  rm -f "${normalized}"
 
   unset '_RALPH_HOOKS_JSON_VISITING["'"${hooks_file}"'"]'
   _RALPH_HOOKS_JSON_DONE["${hooks_file}"]=1
@@ -548,6 +569,7 @@ build_merged_hooks_json() {
   local root_hooks_file="$1"
   local out_file="$2"
   local -a files=()
+  local -a normalized_files=()
   local f
 
   declare -gA _RALPH_HOOKS_JSON_VISITING=()
@@ -558,6 +580,12 @@ build_merged_hooks_json() {
   done < <(hooks_json_collect_files "${root_hooks_file}")
 
   [[ "${#files[@]}" -gt 0 ]] || return 1
+
+  for f in "${files[@]}"; do
+    local norm
+    norm="$(json_like_to_temp_file "${f}")" || return 1
+    normalized_files+=("${norm}")
+  done
 
   jq -s '
     def deepmerge($a; $b):
@@ -570,7 +598,8 @@ build_merged_hooks_json() {
       else $b
       end;
     reduce (map(del(.include, .includes))[]) as $item ({}; deepmerge(.; $item))
-  ' "${files[@]}" > "${out_file}"
+  ' "${normalized_files[@]}" > "${out_file}"
+  rm -f "${normalized_files[@]}"
 }
 
 # Collects tasks.json files in include order (children first, parent last).
@@ -595,6 +624,9 @@ tasks_json_collect_files() {
   _RALPH_TASKS_JSON_VISITING["${tasks_file}"]=1
 
   local include_rel include_abs
+  local normalized
+  normalized="$(json_like_to_temp_file "${tasks_file}")"
+
   while IFS= read -r include_rel; do
     [[ -n "${include_rel}" ]] || continue
     include_abs="$(hooks_json_resolve_include_path "${tasks_file}" "${include_rel}")"
@@ -603,8 +635,9 @@ tasks_json_collect_files() {
     jq -r '
       (.include // .includes // empty)
       | if type == "array" then .[] elif type == "string" then . else empty end
-    ' "${tasks_file}" 2>/dev/null || true
+    ' "${normalized}" 2>/dev/null || true
   )
+  rm -f "${normalized}"
 
   unset '_RALPH_TASKS_JSON_VISITING["'"${tasks_file}"'"]'
   _RALPH_TASKS_JSON_DONE["${tasks_file}"]=1
@@ -616,6 +649,7 @@ build_merged_tasks_json() {
   local root_tasks_file="$1"
   local out_file="$2"
   local -a files=()
+  local -a normalized_files=()
   local f
 
   [[ -n "${root_tasks_file}" ]] || return 1
@@ -630,6 +664,12 @@ build_merged_tasks_json() {
 
   [[ "${#files[@]}" -gt 0 ]] || return 1
 
+  for f in "${files[@]}"; do
+    local norm
+    norm="$(json_like_to_temp_file "${f}")" || return 1
+    normalized_files+=("${norm}")
+  done
+
   jq -s '
     def deepmerge($a; $b):
       if ($a|type) == "object" and ($b|type) == "object" then
@@ -641,7 +681,8 @@ build_merged_tasks_json() {
       else $b
       end;
     reduce (map(del(.include, .includes))[]) as $item ({}; deepmerge(.; $item))
-  ' "${files[@]}" > "${out_file}"
+  ' "${normalized_files[@]}" > "${out_file}"
+  rm -f "${normalized_files[@]}"
 }
 
 # Expands task references (`task`) using tasks.json entries.

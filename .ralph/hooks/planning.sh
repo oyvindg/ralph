@@ -84,6 +84,7 @@ Rules:
 Schema:
 {
   "goal": "the overall objective",
+  "max_steps": 0,
   "steps": [
     {
       "id": "step-1",
@@ -128,6 +129,7 @@ create_stub_plan() {
   cat > "${PLAN_FILE}" <<'STUB'
 {
   "goal": "dry-run stub plan with deterministic phases",
+  "max_steps": 4,
   "steps": [
     {
       "id": "step-1-scan",

@@ -24,6 +24,7 @@ SESSION_DIR="${RALPH_SESSION_DIR:-}"
 STEP="${RALPH_STEP:-0}"
 ASSUME_YES="${RALPH_HUMAN_GUARD_ASSUME_YES:-0}"
 TEMP_SUITE_ON_NO_TESTS="${RALPH_TEMP_TEST_SUITE_ON_NO_TESTS:-1}"
+WORKFLOW_TYPE="${RALPH_WORKFLOW_TYPE:-}"
 
 # Failure simulation
 MOCK_FAIL="${RALPH_MOCK_FAIL_TEST:-0}"
@@ -44,24 +45,74 @@ t_log() {
   echo "$(indent)[testing] $1"
 }
 
+decision_file_path() {
+  if [[ -n "${SESSION_DIR}" ]]; then
+    printf '%s\n' "${SESSION_DIR}/.no_tests_temp_suite_decision"
+  else
+    printf '%s\n' "${WORKSPACE}/.ralph/tmp/.no_tests_temp_suite_decision"
+  fi
+}
+
+write_temp_suite_decision() {
+  local value="$1"
+  local file
+  file="$(decision_file_path)"
+  mkdir -p "$(dirname "${file}")"
+  printf '%s\n' "${value}" > "${file}"
+}
+
+read_temp_suite_decision() {
+  local file
+  file="$(decision_file_path)"
+  [[ -f "${file}" ]] || return 1
+  head -n 1 "${file}" 2>/dev/null || true
+}
+
 should_run_temp_suite() {
   [[ "${TEMP_SUITE_ON_NO_TESTS}" == "1" ]] || return 1
 
+  # Non-code workflow should not be forced through test prompts.
+  if [[ "${WORKFLOW_TYPE}" == "non-code" ]]; then
+    t_log "No tests found; skipping temporary test suite in non-code workflow"
+    return 1
+  fi
+
+  local remembered
+  remembered="$(read_temp_suite_decision || true)"
+  case "${remembered}" in
+    yes)
+      t_log "No tests found; reusing temporary test suite decision: yes"
+      return 0
+      ;;
+    no)
+      t_log "No tests found; reusing temporary test suite decision: no"
+      return 1
+      ;;
+  esac
+
   if [[ "${ASSUME_YES}" == "1" ]]; then
     t_log "No tests found; auto-approving temporary test suite (assume-yes)"
+    write_temp_suite_decision "yes"
     return 0
   fi
 
   if [[ ! -t 0 ]]; then
     t_log "No tests found; non-interactive shell, skipping temporary test suite prompt"
+    write_temp_suite_decision "no"
     return 1
   fi
 
   local answer
   read -r -p "$(indent)[testing] No tests found. Create temporary test suite for this run? [y/N]: " answer
   case "${answer}" in
-    y|Y|yes|YES) return 0 ;;
-    *) return 1 ;;
+    y|Y|yes|YES)
+      write_temp_suite_decision "yes"
+      return 0
+      ;;
+    *)
+      write_temp_suite_decision "no"
+      return 1
+      ;;
   esac
 }
 
@@ -115,15 +166,21 @@ detect_make() {
   [[ -f "${WORKSPACE}/Makefile" ]] && grep -q "^test:" "${WORKSPACE}/Makefile" 2>/dev/null
 }
 
+detect_repo_test_runner() {
+  [[ -x "${WORKSPACE}/tests/run.sh" ]]
+}
+
 detect_npm() {
   [[ -f "${WORKSPACE}/package.json" ]] && \
     grep -q '"test"' "${WORKSPACE}/package.json" 2>/dev/null
 }
 
 detect_pytest() {
+  command -v pytest >/dev/null 2>&1 || return 1
   [[ -f "${WORKSPACE}/pytest.ini" ]] || \
     [[ -f "${WORKSPACE}/setup.py" ]] || \
-    [[ -d "${WORKSPACE}/tests" ]]
+    [[ -f "${WORKSPACE}/pyproject.toml" ]] || \
+    [[ -f "${WORKSPACE}/tox.ini" ]]
 }
 
 detect_go() {
@@ -141,6 +198,11 @@ detect_cargo() {
 run_make_test() {
   t_log "Running: make test"
   make -C "${WORKSPACE}" test
+}
+
+run_repo_test_runner() {
+  t_log "Running: tests/run.sh"
+  (cd "${WORKSPACE}" && ./tests/run.sh)
 }
 
 run_npm_test() {
@@ -170,6 +232,7 @@ run_cargo_test() {
 list_runners() {
   t_log "Available test runners:"
 
+  detect_repo_test_runner && echo "  [x] tests/run.sh" || echo "  [ ] tests/run.sh"
   detect_make   && echo "  [x] make test" || echo "  [ ] make test"
   detect_npm    && echo "  [x] npm test"  || echo "  [ ] npm test"
   detect_pytest && echo "  [x] pytest"    || echo "  [ ] pytest"
@@ -204,6 +267,7 @@ run_dry() {
   list_runners
 
   local count=0
+  detect_repo_test_runner && ((count++)) || true
   detect_make   && ((count++)) || true
   detect_npm    && ((count++)) || true
   detect_pytest && ((count++)) || true
@@ -247,6 +311,11 @@ main() {
   local failed=0
 
   # Run all detected test suites
+  if detect_repo_test_runner; then
+    ((ran++)) || true
+    run_repo_test_runner || ((failed++)) || true
+  fi
+
   if detect_make; then
     ((ran++)) || true
     run_make_test || ((failed++)) || true

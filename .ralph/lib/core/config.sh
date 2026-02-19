@@ -2,6 +2,16 @@
 # Core configuration helpers for Ralph orchestrator.
 set -euo pipefail
 
+CONFIG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+JSON_LIB_PATH="${CONFIG_DIR}/../json.sh"
+if [[ -f "${JSON_LIB_PATH}" ]]; then
+  # shellcheck disable=SC1090
+  source "${JSON_LIB_PATH}"
+else
+  echo "Missing JSON helper library: ${JSON_LIB_PATH}" >&2
+  return 1 2>/dev/null || exit 1
+fi
+
 # Finds project and global .ralph directories.
 find_ralph_dirs() {
   RALPH_GLOBAL_DIR="${HOME}/.ralph"
@@ -16,170 +26,102 @@ find_ralph_dirs() {
   done
 }
 
-# Parses a simple TOML scalar value (string/number/bool) by key.
-parse_toml_value() {
-  local key="$1"
-  local file="$2"
-  [[ ! -f "${file}" ]] && return
+# Loads profile values from one profile.jsonc file.
+load_profile_jsonc_file() {
+  local profile_file="$1"
+  [[ -f "${profile_file}" ]] || return 0
+  command -v jq >/dev/null 2>&1 || return 0
 
-  local value
-  value="$(grep -E "^${key}[[:space:]]*=" "${file}" 2>/dev/null | head -n1 | sed 's/^[^=]*=[[:space:]]*//' | sed 's/[[:space:]]*$//' || true)"
-  if [[ "${value}" =~ ^\"(.*)\"$ ]]; then
-    value="${BASH_REMATCH[1]}"
+  local norm val
+  norm="$(json_like_to_temp_file "${profile_file}")" || return 0
+
+  val="$(jq -r '.defaults.steps // .defaults.iterations // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_STEPS="${val}"
+  val="$(jq -r '.defaults.engine // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_ENGINE="${val}"
+  val="$(jq -r '.defaults.model // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_MODEL="${val}"
+  val="$(jq -r '.defaults.timeout // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_TIMEOUT="${val}"
+  val="$(jq -r '.defaults.skip_git_check // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_SKIP_GIT_CHECK="${val}"
+  val="$(jq -r '.defaults.author // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_AUTHOR="${val}"
+  val="$(jq -r '.defaults.project // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_PROJECT="${val}"
+  val="$(jq -r '.defaults.human_guard // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_HUMAN_GUARD="${val}"
+  val="$(jq -r '.defaults.human_guard_assume_yes // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_HUMAN_GUARD_ASSUME_YES="${val}"
+  val="$(jq -r '.defaults.human_guard_scope // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_HUMAN_GUARD_SCOPE="${val}"
+  val="$(jq -r '.defaults.ticket // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_TICKET="${val}"
+  val="$(jq -r '.defaults.source_control_enabled // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_ENABLED="${val}"
+  val="$(jq -r '.defaults.source_control_backend // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_BACKEND="${val}"
+  val="$(jq -r '.defaults.source_control_allow_commits // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_ALLOW_COMMITS="${val}"
+  val="$(jq -r '.defaults.source_control_branch_per_session // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_BRANCH_PER_SESSION="${val}"
+  val="$(jq -r '.defaults.source_control_branch_name_template // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_BRANCH_NAME_TEMPLATE="${val}"
+  val="$(jq -r '.defaults.source_control_require_ticket_for_branch // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH="${val}"
+  if jq -e '.defaults | has("issues_providers")' "${norm}" >/dev/null 2>&1; then
+    PROFILE_ISSUES_PROVIDERS="$(
+      jq -r '.defaults.issues_providers // [] | .[]' "${norm}" 2>/dev/null | tr '\n' ',' | sed 's/,$//'
+    )"
+  else
+    val="$(jq -r '.defaults.issues_provider // empty' "${norm}" 2>/dev/null || true)"
+    [[ -n "${val}" ]] && PROFILE_ISSUES_PROVIDERS="${val}"
   fi
-  printf '%s' "${value}"
+  val="$(jq -r '.defaults.checkpoint_enabled // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_CHECKPOINT_ENABLED="${val}"
+  val="$(jq -r '.defaults.checkpoint_per_step // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_CHECKPOINT_PER_STEP="${val}"
+  val="$(jq -r '.defaults.hooks_json // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_HOOKS_JSON="${val}"
+  val="$(jq -r '.defaults.tasks_json // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_TASKS_JSON="${val}"
+  val="$(jq -r '.defaults.language // empty' "${norm}" 2>/dev/null || true)"
+  [[ -n "${val}" ]] && PROFILE_LANGUAGE="${val}"
+
+  if jq -e '.hooks | has("disabled")' "${norm}" >/dev/null 2>&1; then
+    PROFILE_DISABLED_HOOKS="$({ jq -r '.hooks.disabled // [] | .[]' "${norm}" 2>/dev/null || true; } | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+  fi
+
+  if jq -e '.defaults | has("agent_routes")' "${norm}" >/dev/null 2>&1; then
+    PROFILE_AGENT_ROUTES="$({
+      jq -r '
+        (.defaults.agent_routes // [])
+        | .[]
+        | if type == "string" then .
+          elif type == "object" then [(.match // ""), (.engine // ""), (.model // "-")] | join("|")
+          else empty end
+      ' "${norm}" 2>/dev/null || true
+    } | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+  fi
+
+  rm -f "${norm}"
 }
 
-# Parses a TOML array value by key (supports multi-line arrays).
-parse_toml_array() {
-  local key="$1"
-  local file="$2"
-  [[ ! -f "${file}" ]] && return
-
-  local value items
-  value="$(
-    awk -v key="${key}" '
-      BEGIN { in_array = 0 }
-      $0 ~ "^[[:space:]]*" key "[[:space:]]*=" {
-        line = $0
-        sub(/^[^=]*=/, "", line)
-        print line
-        if (line ~ /\]/) exit
-        in_array = 1
-        next
-      }
-      in_array == 1 {
-        print $0
-        if ($0 ~ /\]/) exit
-      }
-    ' "${file}" 2>/dev/null | tr '\n' ' '
-  )"
-
-  if [[ "${value}" =~ \[(.*)\] ]]; then
-    items="${BASH_REMATCH[1]}"
-    printf '%s' "${items}" | tr ',' '\n' | sed 's/^[[:space:]]*"//' | sed 's/"[[:space:]]*$//' | tr '\n' ' '
-  fi
-  return 0
-}
-
-# Loads and merges profile values (global first, project overrides).
+# Loads and merges profile values from JSONC (global first, project overrides).
 load_profile() {
-  local global_profile="${RALPH_GLOBAL_DIR}/profile.toml"
-  local project_profile="${RALPH_PROJECT_DIR}/profile.toml"
+  local global_profile="${RALPH_GLOBAL_DIR}/profile.jsonc"
+  local project_profile="${RALPH_PROJECT_DIR}/profile.jsonc"
 
-  if [[ -f "${global_profile}" ]]; then
-    PROFILE_STEPS=$(parse_toml_value "steps" "${global_profile}")
-    [[ -z "${PROFILE_STEPS}" ]] && PROFILE_STEPS=$(parse_toml_value "iterations" "${global_profile}")
-    PROFILE_ENGINE=$(parse_toml_value "engine" "${global_profile}")
-    PROFILE_MODEL=$(parse_toml_value "model" "${global_profile}")
-    PROFILE_TIMEOUT=$(parse_toml_value "timeout" "${global_profile}")
-    PROFILE_SKIP_GIT_CHECK=$(parse_toml_value "skip_git_check" "${global_profile}")
-    PROFILE_DISABLED_HOOKS=$(parse_toml_array "disabled" "${global_profile}")
-    PROFILE_AUTHOR=$(parse_toml_value "author" "${global_profile}")
-    PROFILE_PROJECT=$(parse_toml_value "project" "${global_profile}")
-    PROFILE_HUMAN_GUARD=$(parse_toml_value "human_guard" "${global_profile}")
-    PROFILE_HUMAN_GUARD_ASSUME_YES=$(parse_toml_value "human_guard_assume_yes" "${global_profile}")
-    PROFILE_HUMAN_GUARD_SCOPE=$(parse_toml_value "human_guard_scope" "${global_profile}")
-    PROFILE_AGENT_ROUTES=$(parse_toml_array "agent_routes" "${global_profile}")
-    PROFILE_TICKET=$(parse_toml_value "ticket" "${global_profile}")
-    PROFILE_SOURCE_CONTROL_ENABLED=$(parse_toml_value "source_control_enabled" "${global_profile}")
-    PROFILE_SOURCE_CONTROL_BACKEND=$(parse_toml_value "source_control_backend" "${global_profile}")
-    PROFILE_SOURCE_CONTROL_ALLOW_COMMITS=$(parse_toml_value "source_control_allow_commits" "${global_profile}")
-    PROFILE_SOURCE_CONTROL_BRANCH_PER_SESSION=$(parse_toml_value "source_control_branch_per_session" "${global_profile}")
-    PROFILE_SOURCE_CONTROL_BRANCH_NAME_TEMPLATE=$(parse_toml_value "source_control_branch_name_template" "${global_profile}")
-    PROFILE_SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH=$(parse_toml_value "source_control_require_ticket_for_branch" "${global_profile}")
-    PROFILE_ISSUES_PROVIDER=$(parse_toml_value "issues_provider" "${global_profile}")
-    PROFILE_CHECKPOINT_ENABLED=$(parse_toml_value "checkpoint_enabled" "${global_profile}")
-    PROFILE_CHECKPOINT_PER_STEP=$(parse_toml_value "checkpoint_per_step" "${global_profile}")
-    PROFILE_HOOKS_JSON=$(parse_toml_value "hooks_json" "${global_profile}")
-    PROFILE_TASKS_JSON=$(parse_toml_value "tasks_json" "${global_profile}")
-    PROFILE_LANGUAGE=$(parse_toml_value "language" "${global_profile}")
-  fi
-
-  if [[ -n "${RALPH_PROJECT_DIR}" ]] && [[ -f "${project_profile}" ]]; then
-    local val
-    val=$(parse_toml_value "steps" "${project_profile}")
-    [[ -z "${val}" ]] && val=$(parse_toml_value "iterations" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_STEPS="${val}"
-
-    val=$(parse_toml_value "model" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_MODEL="${val}"
-
-    val=$(parse_toml_value "engine" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_ENGINE="${val}"
-
-    val=$(parse_toml_value "timeout" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_TIMEOUT="${val}"
-
-    val=$(parse_toml_value "skip_git_check" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_SKIP_GIT_CHECK="${val}"
-
-    val=$(parse_toml_array "disabled" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_DISABLED_HOOKS="${val}"
-
-    val=$(parse_toml_value "author" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_AUTHOR="${val}"
-
-    val=$(parse_toml_value "project" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_PROJECT="${val}"
-
-    val=$(parse_toml_value "human_guard" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_HUMAN_GUARD="${val}"
-
-    val=$(parse_toml_value "human_guard_assume_yes" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_HUMAN_GUARD_ASSUME_YES="${val}"
-
-    val=$(parse_toml_value "human_guard_scope" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_HUMAN_GUARD_SCOPE="${val}"
-
-    val=$(parse_toml_array "agent_routes" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_AGENT_ROUTES="${val}"
-
-    val=$(parse_toml_value "ticket" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_TICKET="${val}"
-
-    val=$(parse_toml_value "source_control_enabled" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_ENABLED="${val}"
-
-    val=$(parse_toml_value "source_control_backend" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_BACKEND="${val}"
-
-    val=$(parse_toml_value "source_control_allow_commits" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_ALLOW_COMMITS="${val}"
-
-    val=$(parse_toml_value "source_control_branch_per_session" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_BRANCH_PER_SESSION="${val}"
-
-    val=$(parse_toml_value "source_control_branch_name_template" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_BRANCH_NAME_TEMPLATE="${val}"
-
-    val=$(parse_toml_value "source_control_require_ticket_for_branch" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH="${val}"
-
-    val=$(parse_toml_value "issues_provider" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_ISSUES_PROVIDER="${val}"
-
-    val=$(parse_toml_value "checkpoint_enabled" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_CHECKPOINT_ENABLED="${val}"
-
-    val=$(parse_toml_value "checkpoint_per_step" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_CHECKPOINT_PER_STEP="${val}"
-
-    val=$(parse_toml_value "hooks_json" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_HOOKS_JSON="${val}"
-
-    val=$(parse_toml_value "tasks_json" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_TASKS_JSON="${val}"
-
-    val=$(parse_toml_value "language" "${project_profile}")
-    [[ -n "${val}" ]] && PROFILE_LANGUAGE="${val}"
+  load_profile_jsonc_file "${global_profile}"
+  if [[ -n "${RALPH_PROJECT_DIR}" ]]; then
+    load_profile_jsonc_file "${project_profile}"
   fi
 
   return 0
 }
 
-# Resolves optional hooks.json path from env override or workspace default.
-# Default path is `.ralph/hooks.json` with fallback to legacy `.ralph/hooks/hooks.json`.
+# Resolves optional hooks config path from env override or workspace default.
+# Default path is `.ralph/hooks.jsonc` with fallback to `.ralph/hooks.json`.
 resolve_hooks_json_path() {
   local configured="${RALPH_HOOKS_JSON:-}"
   local candidate=""
@@ -191,14 +133,16 @@ resolve_hooks_json_path() {
       candidate="${ROOT}/${configured}"
     fi
   else
-    if [[ -f "${ROOT}/.ralph/hooks.json" ]]; then
+    if [[ -f "${ROOT}/.ralph/hooks.jsonc" ]]; then
+      candidate="${ROOT}/.ralph/hooks.jsonc"
+    elif [[ -f "${ROOT}/.ralph/hooks.json" ]]; then
       candidate="${ROOT}/.ralph/hooks.json"
     else
-      candidate="${ROOT}/.ralph/hooks/hooks.json"
+      candidate=""
     fi
   fi
 
-  if [[ -f "${candidate}" ]]; then
+  if [[ -n "${candidate}" ]] && [[ -f "${candidate}" ]]; then
     printf '%s\n' "${candidate}"
   fi
 }

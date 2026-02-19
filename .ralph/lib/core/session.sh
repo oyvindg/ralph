@@ -53,6 +53,11 @@ setup_session() {
   last_response="${session_dir}/.last_response.tmp"
   touch "${last_response}" "${step_stats_rows_file}" "${step_details_file}"
   printf '%s\n' "${GOAL}" > "${prompt_input_file}"
+
+  # Guide is treated as read-only input. Keep a session snapshot for integrity checks.
+  if [[ -n "${GUIDE_PATH:-}" ]] && [[ -f "${GUIDE_PATH}" ]]; then
+    cp -a "${GUIDE_PATH}" "${session_dir}/.guide_snapshot"
+  fi
 }
 
 # Writes summary header metadata before steps begin.
@@ -69,7 +74,7 @@ write_summary_header() {
     echo "| engine_default | ${RALPH_ENGINE:-codex} |"
     echo "| model | ${MODEL:-default codex model} |"
     echo "| ticket | ${TICKET:-"(none)"} |"
-    echo "| issues_provider | ${ISSUES_PROVIDER} |"
+    echo "| issues_providers | ${ISSUES_PROVIDERS} |"
     echo "| source_control_enabled | ${SOURCE_CONTROL_ENABLED} |"
     echo "| source_control_backend | ${SOURCE_CONTROL_BACKEND} |"
     echo "| source_control_allow_commits | ${SOURCE_CONTROL_ALLOW_COMMITS} |"
@@ -81,7 +86,11 @@ write_summary_header() {
     echo "| max_steps | $( [[ "${MAX_STEPS}" -eq 0 ]] && echo "unlimited" || echo "${MAX_STEPS}" ) |"
     echo "| prompt_file | $(to_md_link "${prompt_input_file}") |"
     echo "| plan_file | $(to_md_link "$(plan_json_path)") |"
-    echo "| guide_file | ${GUIDE_PATH:+$(to_md_link "${GUIDE_PATH}")}${GUIDE_PATH:-"(none)"} |"
+    if [[ -n "${GUIDE_PATH}" ]]; then
+      echo "| guide_file | $(to_md_link "${GUIDE_PATH}") |"
+    else
+      echo "| guide_file | (none) |"
+    fi
     echo "| timeout_seconds | $( [[ "${TIMEOUT_SECONDS}" -gt 0 ]] && echo "${TIMEOUT_SECONDS}" || echo "disabled" ) |"
     echo "| human_guard | ${HUMAN_GUARD} |"
     echo "| human_guard_assume_yes | ${HUMAN_GUARD_ASSUME_YES} |"

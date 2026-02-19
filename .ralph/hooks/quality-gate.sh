@@ -31,6 +31,8 @@ STEPS="${RALPH_STEPS:-?}"
 RESPONSE_FILE="${RALPH_RESPONSE_FILE:-}"
 WORKSPACE="${RALPH_WORKSPACE:-.}"
 DRY_RUN="${RALPH_DRY_RUN:-0}"
+SESSION_DIR="${RALPH_SESSION_DIR:-}"
+GUIDE_FILE="${RALPH_GUIDE_FILE:-}"
 HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "${HOOKS_DIR}/../lib/log.sh" ]]; then
   # shellcheck disable=SC1091
@@ -96,6 +98,31 @@ check_response() {
   return 0
 }
 
+# Ensures guide file remains unchanged during the session.
+# If changed, restores from snapshot and signals failure.
+enforce_guide_read_only() {
+  [[ -n "${GUIDE_FILE}" ]] || return 0
+  [[ -n "${SESSION_DIR}" ]] || return 0
+
+  local snapshot_file="${SESSION_DIR}/.guide_snapshot"
+  [[ -f "${snapshot_file}" ]] || return 0
+
+  if [[ ! -f "${GUIDE_FILE}" ]]; then
+    cp -a "${snapshot_file}" "${GUIDE_FILE}"
+    ralph_log "WARN" "quality-gate" "Guide file was removed and has been restored: ${GUIDE_FILE}"
+    ralph_event "guide_guard" "restored" "guide removed and restored from snapshot"
+    return 1
+  fi
+
+  if ! cmp -s "${snapshot_file}" "${GUIDE_FILE}"; then
+    cp -a "${snapshot_file}" "${GUIDE_FILE}"
+    ralph_log "WARN" "quality-gate" "Guide file is read-only; reverted changes: ${GUIDE_FILE}"
+    ralph_event "guide_guard" "reverted" "guide modifications were reverted"
+    return 1
+  fi
+  return 0
+}
+
 # =============================================================================
 # Dry-Run
 # =============================================================================
@@ -148,6 +175,9 @@ main() {
 
   # Check response
   check_response || ((failed++)) || true
+
+  # Enforce immutable guide input (if provided via --guide)
+  enforce_guide_read_only || ((failed++)) || true
 
   # Run tests
   call_hook "testing" || ((failed++)) || true

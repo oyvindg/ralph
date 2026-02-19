@@ -23,22 +23,22 @@ fi
 
 WORKSPACE="${RALPH_WORKSPACE:-.}"
 SESSION_DIR="${RALPH_SESSION_DIR:-}"
-PROVIDER="${RALPH_ISSUES_PROVIDER:-none}"
+PROVIDERS="${RALPH_ISSUES_PROVIDERS:-none}"
 EXPLICIT_TICKET="${RALPH_TICKET:-}"
 
 main() {
-  command -v issues_resolve_ticket >/dev/null 2>&1 || exit 0
+  command -v issues_resolve_ticket_multi >/dev/null 2>&1 || exit 0
 
   local ticket context context_file
-  ticket="$(issues_resolve_ticket "${PROVIDER}" "${EXPLICIT_TICKET}" "${WORKSPACE}" || true)"
-  context="$(issues_fetch_context "${PROVIDER}" "${ticket}" || true)"
+  ticket="$(issues_resolve_ticket_multi "${PROVIDERS}" "${EXPLICIT_TICKET}" "${WORKSPACE}" || true)"
+  context="$(issues_fetch_context_multi "${PROVIDERS}" "${ticket}" || true)"
 
   if [[ -n "${SESSION_DIR}" ]]; then
     context_file="${SESSION_DIR}/issue_context.md"
     {
       echo "# Issue Context"
       echo ""
-      echo "- provider: ${PROVIDER}"
+      echo "- providers: ${PROVIDERS}"
       echo "- ticket: ${ticket:-none}"
       if [[ -n "${context}" ]]; then
         echo ""
@@ -51,9 +51,9 @@ main() {
   fi
 
   if [[ -n "${ticket}" ]]; then
-    ralph_event "issues" "ok" "provider=${PROVIDER} ticket=${ticket}"
+    ralph_event "issues" "ok" "providers=${PROVIDERS} ticket=${ticket}"
   else
-    ralph_event "issues" "ok" "provider=${PROVIDER} ticket=none"
+    ralph_event "issues" "ok" "providers=${PROVIDERS} ticket=none"
   fi
 }
 

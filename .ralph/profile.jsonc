@@ -1,0 +1,73 @@
+{
+  // Core execution
+  "defaults": {
+    "steps": 0,
+    "engine": "codex",
+    "model": "gpt-5.3-codex",
+    "timeout": 0,
+    "language": "no",
+
+    // Optional explicit work-item/ticket. Can be overridden by --ticket.
+    "ticket": "",
+
+    // Source control policy (agnostic)
+    // enabled: turn source-control policy on/off
+    // backend: auto | git | filesystem
+    // allow_commits: when true, version-control hook can create step commits (git only)
+    // branch_per_session: when true, before-session creates/switches to a per-session branch (git only)
+    // branch_name_template tokens: {ticket} {goal_slug} {session_id} {date}
+    // require_ticket_for_branch: block session start when branch_per_session=1 and no ticket is provided
+    "source_control_enabled": true,
+    "source_control_backend": "auto",
+    "source_control_allow_commits": false,
+    "source_control_branch_per_session": false,
+    "source_control_branch_name_template": "ralph/{ticket}/{goal_slug}/{session_id}",
+    "source_control_require_ticket_for_branch": false,
+
+    // Issues adapter providers in priority order (agnostic)
+    // Supported entries: none | git | jira
+    "issues_providers": ["none"],
+
+    // Filesystem rollback checkpoints
+    // - pre-session snapshot is controlled by checkpoint_enabled
+    // - per-step snapshots are controlled by checkpoint_per_step
+    "checkpoint_enabled": true,
+    "checkpoint_per_step": true,
+
+    // Human guards
+    "human_guard": true,
+    "human_guard_assume_yes": false,
+    "human_guard_scope": "both",
+
+    // Optional hooks.json/tasks.json override (relative to workspace root or absolute path)
+    // "hooks_json": ".ralph/hooks.json",
+    // "tasks_json": ".ralph/tasks.json",
+
+    // Agent routing per step (optional)
+    // Object format:
+    // - match: case-insensitive substring against step id + description
+    // - engine: target engine for matching steps
+    // - model: optional model override, use "-" to keep active/default model
+    // - use match: "default" for fallback route
+    "agent_routes": [
+      {
+        "match": "test",
+        "engine": "claude",
+        "model": "claude-sonnet-4-20250514"
+      },
+      {
+        "match": "validate",
+        "engine": "claude",
+        "model": "claude-sonnet-4-20250514"
+      },
+      {
+        "match": "default",
+        "engine": "codex",
+        "model": "gpt-5.3-codex"
+      }
+    ]
+  },
+  "hooks": {
+    "disabled": []
+  }
+}

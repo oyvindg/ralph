@@ -13,51 +13,121 @@
 set -euo pipefail
 
 HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "${HOOKS_DIR}/../lib/log.sh" ]]; then
-  # shellcheck disable=SC1091
-  source "${HOOKS_DIR}/../lib/log.sh"
-fi
-
 ENABLED="${RALPH_HUMAN_GUARD:-0}"
 STAGE="${RALPH_HUMAN_GUARD_STAGE:-step}"
 ASSUME_YES="${RALPH_HUMAN_GUARD_ASSUME_YES:-0}"
+ROOT="${RALPH_WORKSPACE:-$(pwd)}"
+HOOKS_JSON_PATH="${RALPH_HOOKS_FILE:-}"
+TASKS_JSON_PATH="${RALPH_TASKS_FILE:-}"
 
-if [[ "${ENABLED}" != "1" ]]; then
-  command -v ralph_log >/dev/null 2>&1 && ralph_log "INFO" "human-gate" "disabled; continuing"
-  exit 0
-fi
+# Loads shared libs used by this hook (logging/parser).
+load_libs() {
+  if [[ -f "${HOOKS_DIR}/../lib/log.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${HOOKS_DIR}/../lib/log.sh"
+  fi
+  if [[ -f "${HOOKS_DIR}/../lib/core/hooks-parser.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${HOOKS_DIR}/../lib/core/hooks-parser.sh"
+  fi
+}
 
-if [[ "${ASSUME_YES}" == "1" ]]; then
-  command -v ralph_log >/dev/null 2>&1 && ralph_log "INFO" "human-gate" "assume-yes enabled; approved"
-  command -v ralph_event >/dev/null 2>&1 && ralph_event "human_gate" "approved" "assume-yes"
-  command -v ralph_state_choice >/dev/null 2>&1 && ralph_state_choice "human-gate" "approved" "assume-yes:${STAGE}"
-  exit 0
-fi
+# Returns success when human gate is enabled.
+is_gate_enabled() {
+  [[ "${ENABLED}" == "1" ]]
+}
 
-if [[ ! -t 0 ]]; then
-  command -v ralph_log >/dev/null 2>&1 && ralph_log "WARN" "human-gate" "non-interactive shell; rejected"
-  command -v ralph_event >/dev/null 2>&1 && ralph_event "human_gate" "rejected" "non-interactive shell"
-  command -v ralph_state_choice >/dev/null 2>&1 && ralph_state_choice "human-gate" "rejected" "non-interactive:${STAGE}"
-  exit 1
-fi
+# Returns success when approvals should be auto-accepted.
+is_assume_yes() {
+  [[ "${ASSUME_YES}" == "1" ]]
+}
 
-prompt="Approve this ${STAGE} to continue? [y/N]: "
-if [[ "${STAGE}" == "session" ]]; then
-  prompt="Approve starting session ${RALPH_SESSION_ID:-}? [y/N]: "
-fi
+# Returns success when shell is interactive.
+is_interactive_tty() {
+  [[ -t 0 ]]
+}
 
-read -r -p "${prompt}" answer
-case "${answer}" in
-  y|Y|yes|YES)
-    command -v ralph_log >/dev/null 2>&1 && ralph_log "INFO" "human-gate" "approved ${STAGE}"
-    command -v ralph_event >/dev/null 2>&1 && ralph_event "human_gate" "approved" "${STAGE}"
-    command -v ralph_state_choice >/dev/null 2>&1 && ralph_state_choice "human-gate" "approved" "${STAGE}"
-    exit 0
-    ;;
-  *)
-    command -v ralph_log >/dev/null 2>&1 && ralph_log "WARN" "human-gate" "rejected ${STAGE}"
-    command -v ralph_event >/dev/null 2>&1 && ralph_event "human_gate" "rejected" "${STAGE}"
-    command -v ralph_state_choice >/dev/null 2>&1 && ralph_state_choice "human-gate" "rejected" "${STAGE}"
-    exit 1
-    ;;
-esac
+# Emits consistent approval/rejection telemetry.
+emit_decision() {
+  local decision="$1"
+  local details="${2:-${STAGE}}"
+  case "${decision}" in
+    approved)
+      command -v ralph_log >/dev/null 2>&1 && ralph_log "INFO" "human-gate" "approved ${details}"
+      command -v ralph_event >/dev/null 2>&1 && ralph_event "human_gate" "approved" "${details}"
+      command -v ralph_state_choice >/dev/null 2>&1 && ralph_state_choice "human-gate" "approved" "${details}"
+      ;;
+    rejected)
+      command -v ralph_log >/dev/null 2>&1 && ralph_log "WARN" "human-gate" "rejected ${details}"
+      command -v ralph_event >/dev/null 2>&1 && ralph_event "human_gate" "rejected" "${details}"
+      command -v ralph_state_choice >/dev/null 2>&1 && ralph_state_choice "human-gate" "rejected" "${details}"
+      ;;
+  esac
+}
+
+# Runs hooks.jsonc-driven select for human gate when configured.
+# Uses event: human-gate-confirm.system
+run_configured_select() {
+  command -v run_json_hook_commands >/dev/null 2>&1 || return 2
+  [[ -n "${HOOKS_JSON_PATH}" && -f "${HOOKS_JSON_PATH}" ]] || return 2
+  command -v jq >/dev/null 2>&1 || return 2
+  command -v json_like_to_temp_file >/dev/null 2>&1 || return 2
+
+  local normalized_hooks
+  normalized_hooks="$(json_like_to_temp_file "${HOOKS_JSON_PATH}")" || return 2
+
+  if ! jq -e '
+    .["human-gate-confirm"]?.system as $node
+    | if $node == null then false
+      elif ($node|type) == "array" then ($node|length) > 0
+      elif ($node|type) == "object" then (($node.commands // [])|length) > 0
+      else false end
+  ' "${normalized_hooks}" >/dev/null 2>&1; then
+    rm -f "${normalized_hooks}"
+    return 2
+  fi
+  rm -f "${normalized_hooks}"
+
+  export RALPH_HUMAN_GUARD_STAGE="${STAGE}"
+  run_json_hook_commands "human-gate-confirm" "system" "${RALPH_STEP:-}" "${RALPH_STEP_EXIT_CODE:-}"
+}
+
+# Main approval flow.
+run_gate() {
+  if ! is_gate_enabled; then
+    command -v ralph_log >/dev/null 2>&1 && ralph_log "INFO" "human-gate" "disabled; continuing"
+    return 0
+  fi
+
+  if is_assume_yes; then
+    emit_decision "approved" "assume-yes:${STAGE}"
+    return 0
+  fi
+
+  if ! is_interactive_tty; then
+    emit_decision "rejected" "non-interactive:${STAGE}"
+    return 1
+  fi
+
+  local rc=2
+  run_configured_select || rc=$?
+  if [[ "${rc}" -eq 0 ]]; then
+    emit_decision "approved" "${STAGE}"
+    return 0
+  fi
+  if [[ "${rc}" -eq 1 ]]; then
+    emit_decision "rejected" "${STAGE}"
+    return 1
+  fi
+
+  command -v ralph_log >/dev/null 2>&1 && ralph_log "ERROR" "human-gate" "missing hooks select config: human-gate-confirm.system"
+  emit_decision "rejected" "missing-config:${STAGE}"
+  return 1
+}
+
+main() {
+  load_libs
+  run_gate
+}
+
+main "$@"

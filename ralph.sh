@@ -1,9 +1,22 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+resolve_script_dir() {
+  local source="${BASH_SOURCE[0]}"
+  while [[ -L "${source}" ]]; do
+    local dir
+    dir="$(cd "$(dirname "${source}")" && pwd)"
+    source="$(readlink "${source}")"
+    [[ "${source}" != /* ]] && source="${dir}/${source}"
+  done
+  local final_dir
+  final_dir="$(cd "$(dirname "${source}")" && pwd)"
+  printf '%s' "${final_dir}"
+}
+
 # Initializes runtime defaults and shared globals.
 init_runtime_defaults() {
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  SCRIPT_DIR="$(resolve_script_dir)"
   RALPH_VERSION="0.1.0"
 
   # =============================================================================
@@ -17,6 +30,7 @@ init_runtime_defaults() {
   PLAN_FILE="plan.json"
   PLAN_FILE_PATH=""
   PLAN_CLI_SET=0
+  NEW_PLAN=0
   GUIDE_PATH=""
   GUIDE_CONTENT=""
   DRY_RUN=0
@@ -35,7 +49,7 @@ init_runtime_defaults() {
   SOURCE_CONTROL_BRANCH_PER_SESSION=""
   SOURCE_CONTROL_BRANCH_NAME_TEMPLATE=""
   SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH=""
-  ISSUES_PROVIDER=""
+  ISSUES_PROVIDERS=""
   CHECKPOINT_ENABLED=""
   CHECKPOINT_PER_STEP=""
   CHECKPOINT_MODE=""
@@ -50,6 +64,7 @@ init_runtime_defaults() {
   SETUP_MODE=0
   SETUP_FORCE=0
   SETUP_TARGET=""
+  TEST_MODE=0
 
   # Session variables (set in setup_session)
   session_dir=""
@@ -90,7 +105,7 @@ init_runtime_defaults() {
   PROFILE_SOURCE_CONTROL_BRANCH_PER_SESSION=""
   PROFILE_SOURCE_CONTROL_BRANCH_NAME_TEMPLATE=""
   PROFILE_SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH=""
-  PROFILE_ISSUES_PROVIDER=""
+  PROFILE_ISSUES_PROVIDERS=""
   PROFILE_CHECKPOINT_ENABLED=""
   PROFILE_CHECKPOINT_PER_STEP=""
   PROFILE_HOOKS_JSON=""
@@ -436,7 +451,7 @@ run_hook() {
   export RALPH_SOURCE_CONTROL_BRANCH_PER_SESSION="${SOURCE_CONTROL_BRANCH_PER_SESSION}"
   export RALPH_SOURCE_CONTROL_BRANCH_NAME_TEMPLATE="${SOURCE_CONTROL_BRANCH_NAME_TEMPLATE}"
   export RALPH_SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH="${SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH}"
-  export RALPH_ISSUES_PROVIDER="${ISSUES_PROVIDER}"
+  export RALPH_ISSUES_PROVIDERS="${ISSUES_PROVIDERS}"
   export RALPH_CHECKPOINT_ENABLED="${CHECKPOINT_ENABLED}"
   export RALPH_CHECKPOINT_PER_STEP="${CHECKPOINT_PER_STEP}"
   export RALPH_TIMEOUT="${TIMEOUT_SECONDS:-0}"
@@ -449,6 +464,7 @@ run_hook() {
   export RALPH_LANG="${LANG_CODE:-en}"
   export RALPH_VERBOSE="${VERBOSE}"
   export RALPH_WORKFLOW_TYPE="${RALPH_WORKFLOW_TYPE:-$(state_get_workflow_type || true)}"
+  export RALPH_HOOKS_FILE="${HOOKS_JSON_PATH:-}"
   export RALPH_TASKS_FILE="${TASKS_JSON_PATH:-}"
 
   # Step-specific vars
@@ -500,6 +516,9 @@ run_hook() {
 
 # List available AI engines
 list_engines() {
+  if ! declare -F find_ralph_dirs >/dev/null 2>&1; then
+    bootstrap_config_lib
+  fi
   find_ralph_dirs
 
   local ai_hook
@@ -538,6 +557,16 @@ run_setup_install() {
   "${installer}" "${args[@]}"
 }
 
+run_repo_tests() {
+  local test_runner="${SCRIPT_DIR}/tests/run.sh"
+  if [[ ! -x "${test_runner}" ]]; then
+    echo "ERROR: test runner not found or not executable: ${test_runner}" >&2
+    echo "Next step: see ${SCRIPT_DIR}/tests/README.md" >&2
+    exit 1
+  fi
+  "${test_runner}"
+}
+
 usage() {
   cat <<EOF
 Usage:
@@ -549,6 +578,7 @@ Required:
 Options:
       --steps <N>         Max steps to run (default: all pending, or profile default)
       --plan <file>       Execution plan file (default: plan.json -> .ralph/plans/plan.json)
+      --new-plan          Create/select a new plan interactively, regardless of existing plan state
       --guide <file>      Optional guidance file (e.g., AGENTS.md)
       --workspace <path>  Workspace directory (default: current dir)
       --model <name>      Model name (default: engine default)
@@ -570,6 +600,7 @@ Options:
       --setup             Install/update global baseline (~/.ralph) and exit
       --setup-force       Overwrite existing global files (used with --setup)
       --setup-target <dir> Install baseline to custom target dir (with --setup)
+      --test              Run Ralph repo test suite and exit
       --version          Show version and exit
       --dry-run           Run full workflow with mock AI (no API calls)
 
@@ -580,6 +611,7 @@ Examples:
   ./ralph.sh --goal "Optimize queries" --guide AGENTS.md # With guidance file
   ./ralph.sh --goal "Fix bug" --ticket ABC-123           # Attach work item id
   ./ralph.sh --setup                                      # Install ~/.ralph baseline
+  ./ralph.sh --test                                       # Run tests/run.sh
 EOF
 }
 
@@ -597,6 +629,7 @@ parse_args() {
       --steps) MAX_STEPS="${2:-}"; shift 2 ;;
       --goal) GOAL="${2:-}"; shift 2 ;;
       --plan) PLAN_FILE="${2:-}"; PLAN_CLI_SET=1; shift 2 ;;
+      --new-plan) NEW_PLAN=1; shift ;;
       --guide) GUIDE_PATH="${2:-}"; shift 2 ;;
       --workspace) WORKSPACE="${2:-}"; shift 2 ;;
       --model) MODEL="${2:-}"; MODEL_CLI_SET=1; shift 2 ;;
@@ -616,6 +649,7 @@ parse_args() {
       --setup) SETUP_MODE=1; shift ;;
       --setup-force) SETUP_FORCE=1; shift ;;
       --setup-target) SETUP_TARGET="${2:-}"; shift 2 ;;
+      --test) TEST_MODE=1; shift ;;
       --version)
         if command -v ralph_print_version >/dev/null 2>&1; then
           ralph_print_version "${SCRIPT_DIR}"
@@ -631,6 +665,10 @@ parse_args() {
 
   if [[ "${SETUP_MODE}" -eq 1 ]]; then
     run_setup_install
+    exit 0
+  fi
+  if [[ "${TEST_MODE}" -eq 1 ]]; then
+    run_repo_tests
     exit 0
   fi
 }
@@ -692,7 +730,7 @@ validate_args() {
   SOURCE_CONTROL_BRANCH_PER_SESSION="${RALPH_SOURCE_CONTROL_BRANCH_PER_SESSION:-${PROFILE_SOURCE_CONTROL_BRANCH_PER_SESSION:-0}}"
   SOURCE_CONTROL_BRANCH_NAME_TEMPLATE="${RALPH_SOURCE_CONTROL_BRANCH_NAME_TEMPLATE:-${PROFILE_SOURCE_CONTROL_BRANCH_NAME_TEMPLATE:-ralph/{ticket}/{goal_slug}/{session_id}}}"
   SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH="${RALPH_SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH:-${PROFILE_SOURCE_CONTROL_REQUIRE_TICKET_FOR_BRANCH:-0}}"
-  ISSUES_PROVIDER="${RALPH_ISSUES_PROVIDER:-${PROFILE_ISSUES_PROVIDER:-none}}"
+  ISSUES_PROVIDERS="${RALPH_ISSUES_PROVIDERS:-${PROFILE_ISSUES_PROVIDERS:-none}}"
   CHECKPOINT_ENABLED="${RALPH_CHECKPOINT_ENABLED:-${PROFILE_CHECKPOINT_ENABLED:-1}}"
   CHECKPOINT_PER_STEP="${RALPH_CHECKPOINT_PER_STEP:-${PROFILE_CHECKPOINT_PER_STEP:-1}}"
 
@@ -752,11 +790,26 @@ validate_args() {
     *) echo "source_control_backend must be one of: auto, git, filesystem" >&2; exit 1 ;;
   esac
 
-  ISSUES_PROVIDER="$(printf '%s' "${ISSUES_PROVIDER}" | tr '[:upper:]' '[:lower:]')"
-  case "${ISSUES_PROVIDER}" in
-    none|git|jira) ;;
-    *) echo "issues_provider must be one of: none, git, jira" >&2; exit 1 ;;
-  esac
+  ISSUES_PROVIDERS="$(
+    printf '%s' "${ISSUES_PROVIDERS}" \
+      | tr '[:upper:]' '[:lower:]' \
+      | tr ';' ',' \
+      | tr -s '[:space:]' ',' \
+      | sed 's/^,*//; s/,*$//; s/,,*/,/g'
+  )"
+  [[ -z "${ISSUES_PROVIDERS}" ]] && ISSUES_PROVIDERS="none"
+  local _issues_provider _issues_seen_non_none=0
+  for _issues_provider in ${ISSUES_PROVIDERS//,/ }; do
+    case "${_issues_provider}" in
+      none|git|jira) ;;
+      *) echo "issues_providers must contain only: none, git, jira" >&2; exit 1 ;;
+    esac
+    [[ "${_issues_provider}" != "none" ]] && _issues_seen_non_none=1
+  done
+  if [[ "${_issues_seen_non_none}" -eq 1 ]]; then
+    ISSUES_PROVIDERS="$(printf '%s' "${ISSUES_PROVIDERS}" | sed 's/\(^\|,\)none,\?//g; s/^,*//; s/,*$//')"
+  fi
+  [[ -z "${ISSUES_PROVIDERS}" ]] && ISSUES_PROVIDERS="none"
 
   case "${SOURCE_CONTROL_ENABLED}" in
     1|true|TRUE|yes|YES) SOURCE_CONTROL_ENABLED=1 ;;
@@ -814,11 +867,20 @@ validate_args() {
   fi
 
   # Resolve execution plan path.
+  if [[ "${NEW_PLAN}" -eq 1 ]]; then
+    local forced_new_plan
+    forced_new_plan="$(create_new_plan_from_prompt_interactive || true)"
+    if [[ -z "${forced_new_plan}" ]]; then
+      echo "--new-plan was requested, but new plan creation was canceled or failed." >&2
+      exit 1
+    fi
+    PLAN_FILE_PATH="${forced_new_plan}"
+    echo "${C_CYAN}[session]${C_RESET} Created and selected plan: $(to_rel_path "${PLAN_FILE_PATH}")"
+  elif [[ "${PLAN_CLI_SET}" -eq 1 ]]; then
   # If --plan was not explicitly set, auto-select from .ralph/plans/*.json:
   # - 0 plans: fallback to default plan.json path
   # - 1 plan: auto-select it
   # - >1 plans: reuse state last_plan_file when valid, else interactive select (TTY), else first plan
-  if [[ "${PLAN_CLI_SET}" -eq 1 ]]; then
     PLAN_FILE_PATH="$(resolve_plan_file_path "${PLAN_FILE}")"
   else
     local -a plan_candidates=()
@@ -1394,6 +1456,14 @@ main() {
     # MAX_STEPS=0 means no limit (run all pending)
     # MAX_STEPS>0 means run up to that many steps
     local step_limit="${MAX_STEPS}"
+    local plan_step_limit
+    plan_step_limit="$(get_plan_max_steps)"
+    if [[ "${plan_step_limit}" =~ ^[0-9]+$ ]] && [[ "${plan_step_limit}" -gt 0 ]]; then
+      if [[ "${step_limit}" -eq 0 ]] || [[ "${step_limit}" -gt "${plan_step_limit}" ]]; then
+        step_limit="${plan_step_limit}"
+      fi
+      echo "${C_CYAN}[session]${C_RESET} Plan max_steps applied: ${plan_step_limit}"
+    fi
     [[ "${step_limit}" -eq 0 ]] && step_limit=999999  # Effectively unlimited
 
     while [[ "${i}" -le "${step_limit}" ]]; do

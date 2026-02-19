@@ -1,5 +1,6 @@
 # Ralph sessions (auto-generated)
 .ralph/sessions/
+.ralph/state.json
 
 # Legacy location
 sessions/

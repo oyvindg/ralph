@@ -1,6 +1,6 @@
 {
   "last_plan_file": ".ralph/plans/plan.json",
-  "last_selected_at": "2026-02-19T21:20:59Z",
+  "last_selected_at": "2026-02-19T23:01:35Z",
   "last_selected_by": "oyvindg",
   "hook_choices": [
     {
@@ -282,8 +282,358 @@
       "selected_by": "oyvindg",
       "session_id": "20260219_222059_238176",
       "step": null
+    },
+    {
+      "timestamp": "2026-02-19T22:50:51Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_235051_510341",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T22:57:59Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_235759_533243",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:01:35Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260220_000135_545621",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:20:30Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:20:30Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "non-interactive:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:20:54Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:20:54Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "non-interactive:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:22:13Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:22:13Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "non-interactive:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:22:59Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:23:00Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "non-interactive:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:23:44Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:23:44Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "non-interactive:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:23:44Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:23:44Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "non-interactive:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:24:32Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:24:32Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "missing-config:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:36:20Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:36:20Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "non-interactive:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:36:25Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:36:25Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "non-interactive:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:37:18Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:37:18Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "missing-config:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:37:32Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:37:32Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "non-interactive:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:38:45Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:38:45Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "missing-config:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:40:28Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:40:28Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "non-interactive:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:40:38Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:40:38Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "missing-config:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:42:05Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:42:05Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "missing-config:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:42:44Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "approved",
+      "details": "assume-yes:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T23:42:44Z",
+      "source": "hook",
+      "hook": "human-gate",
+      "choice": "rejected",
+      "details": "non-interactive:step",
+      "selected_by": "oyvindg",
+      "session_id": "",
+      "step": null
     }
   ],
-  "last_choice_at": "2026-02-19T21:20:59Z",
+  "last_choice_at": "2026-02-19T23:42:44Z",
   "last_choice_by": "oyvindg"
 }
