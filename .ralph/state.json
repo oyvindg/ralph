@@ -1,5 +1,289 @@
 {
-  "last_plan_file": "examples/dry-run/plans/bugfix-triage.json",
-  "last_selected_at": "2026-02-19T18:23:04Z",
-  "last_selected_by": "oyvindg"
+  "last_plan_file": ".ralph/plans/plan.json",
+  "last_selected_at": "2026-02-19T21:20:59Z",
+  "last_selected_by": "oyvindg",
+  "hook_choices": [
+    {
+      "timestamp": "2026-02-19T19:21:25Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-yes",
+      "details": "assume-yes",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_202125_4085416",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T19:21:25Z",
+      "source": "hooks.json",
+      "hook": "quality-gate",
+      "choice": "approved",
+      "details": "assume-yes: echo '[custom] extra quality check for step ${RALPH_STEP}'",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_202125_4085416",
+      "step": "1"
+    },
+    {
+      "timestamp": "2026-02-19T19:21:34Z",
+      "source": "hooks.json",
+      "hook": "quality-gate",
+      "choice": "approved",
+      "details": "manual-test",
+      "selected_by": "oyvindg",
+      "session_id": "test",
+      "step": "1"
+    },
+    {
+      "timestamp": "2026-02-19T19:21:53Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-yes",
+      "details": "assume-yes",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_202153_4087582",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T19:21:53Z",
+      "source": "hooks.json",
+      "hook": "quality-gate",
+      "choice": "approved",
+      "details": "assume-yes: echo '[custom] extra quality check for step ${RALPH_STEP}'",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_202153_4087582",
+      "step": "1"
+    },
+    {
+      "timestamp": "2026-02-19T19:28:15Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_202815_4107616",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T19:33:30Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_203330_4122760",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T19:42:52Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_204252_4150035",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T19:45:19Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_204519_4158969",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T19:45:19Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_204519_4158988",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T19:53:46Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-yes",
+      "details": "assume-yes",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_205346_4182338",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T19:58:16Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_205816_3646",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T20:06:08Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_210608_26763",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T20:11:17Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_211117_41690",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T20:16:55Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_211655_57847",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T20:21:01Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_212101_68868",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T20:27:41Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_212741_86904",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T20:36:09Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_213609_110160",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T20:37:24Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_213724_114214",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T20:38:42Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_213842_118376",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T20:39:05Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_213905_119894",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T20:40:53Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_214053_125194",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T20:43:30Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_214330_133402",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T20:43:45Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_214345_134583",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T20:47:45Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_214745_146290",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T20:53:16Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_215316_161431",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T20:55:41Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_215541_168621",
+      "step": null
+    },
+    {
+      "timestamp": "2026-02-19T21:20:59Z",
+      "source": "hook",
+      "hook": "before-session",
+      "choice": "plan-approval-skipped",
+      "details": "plan already completed",
+      "selected_by": "oyvindg",
+      "session_id": "20260219_222059_238176",
+      "step": null
+    }
+  ],
+  "last_choice_at": "2026-02-19T21:20:59Z",
+  "last_choice_by": "oyvindg"
 }

@@ -14,6 +14,21 @@ This repository's implementation supports multiple AI engines and uses a hook-ba
 
 ## Install in a Specific Repo
 
+### Option 0: Install from GitHub Releases (recommended for new machines)
+
+1. Download and extract a Ralph release archive from GitHub Releases.
+2. Run installer from extracted folder:
+
+```bash
+chmod +x install.sh
+./install.sh --setup-force
+```
+
+This installs:
+- Ralph runtime: `~/.local/share/ralph`
+- CLI symlink: `~/.local/bin/ralph`
+- Global baseline config: `~/.ralph` (via `ralph --setup`)
+
 ### Option 1: Use Ralph directly from GitHub repo clone
 
 ```bash
@@ -36,6 +51,19 @@ chmod +x .tools/ralph/ralph.sh
 ```
 
 If you keep project-specific `.ralph/` config in the target repo, Ralph will use that automatically.
+
+### Option 3: Install/update global baseline config (`~/.ralph`)
+
+```bash
+cd ~/.ralph-tool
+chmod +x .ralph/lib/setup/install-global.sh
+
+# Keep existing files in ~/.ralph
+.ralph/lib/setup/install-global.sh
+
+# Overwrite existing files in ~/.ralph
+.ralph/lib/setup/install-global.sh --force
+```
 
 ## AI Engines
 
@@ -326,6 +354,9 @@ Ralph uses a `.ralph/` directory for configuration:
 ```
 .ralph/
 ├── profile.toml      # Default settings
+├── hooks.json        # Hook orchestration (events, select, includes)
+├── tasks.json        # Reusable task catalog (task targets)
+├── lang/             # UI language maps (en/no/sv/custom)
 ├── lib/              # Shared helpers (UI, logging, source-control, issues adapters)
 ├── hooks/            # Lifecycle hooks
 │   ├── ai.sh         # AI engine dispatcher
@@ -334,8 +365,9 @@ Ralph uses a `.ralph/` directory for configuration:
 │   ├── after-session.sh
 │   ├── quality-gate.sh
 │   ├── testing.sh
-│   ├── after-step.sh
-│   └── version-control.sh
+│   └── after-step.sh
+├── lib/tasks/        # Task scripts used by hooks.json/tasks.json
+│   └── version-control.task.sh
 ├── plans/            # Reusable plan templates
 │   └── refactor.md
 └── sessions/         # Session artifacts (gitignored)
@@ -378,6 +410,11 @@ human_guard_assume_yes = false
 # session | step | both
 human_guard_scope = "both"
 
+# optional hooks.json override (relative to workspace root or absolute path)
+# hooks_json = ".ralph/hooks.json"
+# optional tasks.json override (relative to workspace root or absolute path)
+# tasks_json = ".ralph/tasks.json"
+
 # optional per-step agent routing
 agent_routes = [
   "test|claude|claude-sonnet-4-20250514",
@@ -400,11 +437,118 @@ Hooks are shell scripts that run at lifecycle events. They receive context via e
 | `quality-gate.sh` | After AI response | Validation, testing |
 | `testing.sh` | Called by quality-gate | Run project tests |
 | `after-step.sh` | After quality-gate passes | Logging, metrics |
-| `version-control.sh` | Called by after-step | Git/file-based step change log generation |
+| `version-control.task.sh` | Triggered by `hooks.json` `after-step` task | Git/file-based step change log generation |
 | `issues.sh` | Called by before-session | Optional ticket/work-item context enrichment (provider adapter) |
 | `after-session.sh` | Session end | Cleanup, summary |
 | `on-error.sh` | On failure | Error handling |
 | `ai.sh` | AI execution | Engine abstraction |
+
+### `hooks.json` (optional command hooks)
+
+In addition to shell hook scripts, Ralph can run command hooks from JSON.
+
+- Default path: `.ralph/hooks.json` (in current workspace)
+- Legacy fallback: `.ralph/hooks/hooks.json` (still supported)
+- Override path: `RALPH_HOOKS_JSON=<path>`
+  - `profile.toml` can also set `hooks_json = "<path>"` (used when env is not set)
+  - `profile.toml` can also set `tasks_json = "<path>"` for task catalogs
+  - Absolute path is supported
+  - Relative path is resolved from workspace root
+
+Example config:
+
+- Source files:
+  - `examples/hooks/hooks.example.json`
+  - `examples/hooks/other-hooks.example.json` (included by `hooks.example.json`)
+  - `examples/hooks/verbose-loggings.json` (adds extra verbose hook logging)
+  - `examples/hooks/wizard-select.example.json` (hook-driven startup wizard via `select`)
+  - `examples/tasks/tasks.example.json` + `examples/tasks/other-tasks.example.json` (task catalog + include)
+- Copy them to activate in your repo:
+
+```bash
+mkdir -p .ralph/hooks
+cp examples/hooks/hooks.example.json .ralph/hooks.json
+cp examples/hooks/other-hooks.example.json .ralph/hooks/other-hooks.example.json
+cp examples/tasks/tasks.example.json .ralph/tasks.json
+mkdir -p .ralph/tasks
+cp examples/tasks/other-tasks.example.json .ralph/tasks/other-tasks.example.json
+
+# Optional: use verbose logging profile
+cp examples/hooks/verbose-loggings.json .ralph/hooks/verbose-loggings.json
+# then set hooks_json in profile.toml or env:
+# hooks_json = ".ralph/hooks/verbose-loggings.json"
+# or: RALPH_HOOKS_JSON=.ralph/hooks/verbose-loggings.json
+```
+
+Behavior:
+
+- Command runs directly when `human_gate` is omitted or `false`
+- Command requires approval when `human_gate` is `true` or an object
+- `--human-guard-assume-yes 1` auto-approves those prompts
+- `run_in_dry_run: true` is required if command should execute during `--dry-run`
+- Use `include` or `includes` at root level to compose hook files:
+  - string: `"include": "other-hooks.example.json"`
+  - array: `"include": ["a.json", "b.json"]`
+  - include paths are resolved relative to the parent hooks file
+- `select` entries are supported for interactive menus (single/multi) so wizard logic can live in JSON instead of shell hardcoding.
+- Hook entries can reference reusable tasks from `.ralph/tasks.json` via `task`.
+- Default setup already uses this pattern for `after-step` -> `version-control` via `task: "version-control"`.
+- New standard: each event uses explicit phases:
+  - `before-system` (user hooks before shell hook)
+  - `system` (system command hooks for that event)
+  - `after-system` (user hooks after shell hook)
+
+### `tasks.json` (reusable task catalog)
+
+- Default path: `.ralph/tasks.json` (in current workspace)
+- Legacy fallback: `.ralph/tasks/tasks.json` (still supported)
+- Override path: `RALPH_TASKS_JSON=<path>`
+- Supports `include` / `includes` just like `hooks.json` (for `.ralph/tasks/other-tasks.json`, etc.)
+
+Task reference example:
+
+```json
+// .ralph/tasks.json
+{
+  "tasks": {
+    "lint": { "run": "npm run lint", "cwd": ".", "when": "test -f package.json", "run_in_dry_run": true }
+  }
+}
+```
+
+```json
+// .ralph/hooks.json
+{
+  "before-step": {
+    "before-system": [
+      { "task": "lint" }
+    ]
+  }
+}
+```
+
+`when` is optional and runs as a shell condition/command. Task runs only when it exits `0`.
+
+`select` example:
+
+```json
+{
+  "before-session": {
+    "before-system": [
+      {
+        "select": {
+          "mode": "single",
+          "prompt": "Choose workspace profile:",
+          "options": [
+            { "code": "coding", "label": "Coding", "run": "echo coding selected" },
+            { "code": "finance", "label": "Finance", "run": "echo finance selected" }
+          ]
+        }
+      }
+    ]
+  }
+}
+```
 
 ### Exit Codes
 
@@ -444,6 +588,7 @@ RALPH_CHECKPOINT_PER_STEP
 RALPH_HUMAN_GUARD     # "1" enables human approval guard
 RALPH_HUMAN_GUARD_ASSUME_YES  # "1" auto-approves guard prompts
 RALPH_HUMAN_GUARD_SCOPE  # session | step | both
+RALPH_WORKFLOW_TYPE  # selected workflow profile (e.g. coding, finance)
 ```
 
 ## Dry-Run Mode
@@ -631,6 +776,9 @@ When errors occur:
 - For non-interactive runs, set `RALPH_HUMAN_GUARD_ASSUME_YES=1` to avoid prompts explicitly.
 - With human guard enabled, `before-session` also shows a plan review and asks for plan approval (yes/no), including in `--dry-run`.
 - Hook logs are written to `.ralph/sessions/<session_id>/hooks.log` and `.ralph/sessions/<session_id>/events.jsonl`.
+- Human/hook choices are also appended to `.ralph/state.json` under `hook_choices` (with timestamp, user, session, step).
+- If workspace is effectively empty (only `.git`/`.ralph`), `before-session` shows a startup wizard (interactive) to choose workflow type (`coding`, `project-management`, `finance`, `non-code`). The selection is stored in `.ralph/state.json` and exposed to hooks as `RALPH_WORKFLOW_TYPE`.
+- Optional bootstrap hook: add `.ralph/hooks/wizard.sh` to run custom setup logic based on `RALPH_WORKFLOW_TYPE`.
 - Human-guard settings precedence: CLI flags > environment variables > `profile.toml` defaults.
 - If no test runner is detected, `testing.sh` can prompt to create/run a temporary sanity test suite for the current step.
 - You can disable this fallback with `RALPH_TEMP_TEST_SUITE_ON_NO_TESTS=0`.

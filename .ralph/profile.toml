@@ -4,6 +4,7 @@ steps = 0
 engine = "codex"
 model = "gpt-5.3-codex"
 timeout = 0
+language = "no"
 
 # Optional explicit work-item/ticket. Can be overridden by --ticket.
 ticket = ""
@@ -36,6 +37,11 @@ checkpoint_per_step = true
 human_guard = true
 human_guard_assume_yes = false
 human_guard_scope = "both"
+
+# Optional hooks.json override (relative to workspace root or absolute path)
+# hooks_json = ".ralph/hooks.json"
+# Optional tasks.json override (relative to workspace root or absolute path)
+# tasks_json = ".ralph/tasks.json"
 
 # Agent routing per step (optional)
 # Format: "<match>|<engine>|<model>"

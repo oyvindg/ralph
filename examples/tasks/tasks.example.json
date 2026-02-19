@@ -1,0 +1,11 @@
+{
+  "include": [
+    "tasks/other-tasks.example.json"
+  ],
+  "tasks": {
+    "echo-workspace": {
+      "run": "echo workspace=${RALPH_WORKSPACE}",
+      "run_in_dry_run": true
+    }
+  }
+}

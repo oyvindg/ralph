@@ -1,0 +1,8 @@
+{
+  "tasks": {
+    "echo-session": {
+      "run": "echo session=${RALPH_SESSION_ID}",
+      "run_in_dry_run": true
+    }
+  }
+}

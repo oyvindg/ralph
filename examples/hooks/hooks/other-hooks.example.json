@@ -1,0 +1,16 @@
+{
+  "before-session": {
+    "commands": [
+      {
+        "run": "echo '[shared] from included hooks file'",
+        "run_in_dry_run": true
+      }
+    ]
+  },
+  "after-session": [
+    {
+      "run": "echo '[shared] included after-session hook'",
+      "run_in_dry_run": true
+    }
+  ]
+}

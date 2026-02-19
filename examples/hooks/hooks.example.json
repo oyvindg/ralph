@@ -1,0 +1,45 @@
+{
+  "include": [
+    "hooks/other-hooks.example.json"
+  ],
+  "before-session": {
+    "stop_on_error": true,
+    "commands": [
+      {
+        "run": "echo '[custom] validating workspace'",
+        "run_in_dry_run": true
+      },
+      {
+        "run": "echo '[custom] optional preflight'",
+        "allow_failure": true
+      }
+    ]
+  },
+  "before-step": [
+    {
+      "run": "echo '[custom] before step ${RALPH_STEP}'",
+      "cwd": ".",
+      "run_in_dry_run": true
+    }
+  ],
+  "quality-gate": [
+    {
+      "run": "echo '[custom] extra quality check for step ${RALPH_STEP}'",
+      "human_gate": {
+        "prompt": "Run extra quality command for this step?",
+        "default_yes": false
+      },
+      "run_in_dry_run": true
+    }
+  ],
+  "after-step": [
+    {
+      "run": "echo '[custom] after step ${RALPH_STEP} (exit=${RALPH_STEP_EXIT_CODE})'"
+    }
+  ],
+  "after-session": [
+    {
+      "run": "echo '[custom] session finished: ${RALPH_SESSION_ID}'"
+    }
+  ]
+}

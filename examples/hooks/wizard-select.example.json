@@ -1,0 +1,32 @@
+{
+  "before-session": [
+    {
+      "select": {
+        "mode": "single",
+        "prompt": "Choose workspace profile:",
+        "options": [
+          {
+            "code": "coding",
+            "label": "Coding",
+            "run": "echo '[wizard] coding profile selected'"
+          },
+          {
+            "code": "project-management",
+            "label": "Project Management",
+            "run": "echo '[wizard] project-management profile selected'"
+          },
+          {
+            "code": "finance",
+            "label": "Finance",
+            "run": "echo '[wizard] finance profile selected'"
+          },
+          {
+            "code": "non-code",
+            "label": "Non-code",
+            "run": "echo '[wizard] non-code profile selected'"
+          }
+        ]
+      }
+    }
+  ]
+}

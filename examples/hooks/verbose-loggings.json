@@ -1,0 +1,37 @@
+{
+  "include": [
+    "hooks.example.json"
+  ],
+  "before-session": {
+    "commands": [
+      {
+        "run": "echo \"[verbose] start session=${RALPH_SESSION_ID} workspace=${RALPH_WORKSPACE} steps=${RALPH_STEPS}\" | tee -a .ralph/sessions/${RALPH_SESSION_ID}/verbose.log",
+        "run_in_dry_run": true
+      }
+    ]
+  },
+  "before-step": [
+    {
+      "run": "echo \"[verbose] before-step step=${RALPH_STEP} engine=${RALPH_ENGINE} model=${RALPH_MODEL}\" | tee -a .ralph/sessions/${RALPH_SESSION_ID}/verbose.log",
+      "run_in_dry_run": true
+    }
+  ],
+  "quality-gate": [
+    {
+      "run": "echo \"[verbose] quality-gate step=${RALPH_STEP} response=${RALPH_RESPONSE_FILE}\" | tee -a .ralph/sessions/${RALPH_SESSION_ID}/verbose.log",
+      "run_in_dry_run": true
+    }
+  ],
+  "after-step": [
+    {
+      "run": "echo \"[verbose] after-step step=${RALPH_STEP} exit=${RALPH_STEP_EXIT_CODE}\" | tee -a .ralph/sessions/${RALPH_SESSION_ID}/verbose.log",
+      "run_in_dry_run": true
+    }
+  ],
+  "after-session": [
+    {
+      "run": "echo \"[verbose] done session=${RALPH_SESSION_ID}\" | tee -a .ralph/sessions/${RALPH_SESSION_ID}/verbose.log",
+      "run_in_dry_run": true
+    }
+  ]
+}
