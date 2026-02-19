@@ -1,0 +1,7 @@
+{
+  "wizard.workflow.prompt": "Velg arbeidsflyt for dette tomme workspace-et:",
+  "wizard.workflow.coding": "Koding",
+  "wizard.workflow.project_management": "Prosjektstyring",
+  "wizard.workflow.finance": "Finans",
+  "wizard.workflow.non_code": "Ikke-kode"
+}

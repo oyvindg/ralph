@@ -4,6 +4,12 @@ set -euo pipefail
 
 RALPH_HOOK_LOG_FILE="${RALPH_SESSION_DIR:-}/hooks.log"
 RALPH_EVENT_LOG_FILE="${RALPH_SESSION_DIR:-}/events.jsonl"
+RALPH_LOG_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ -f "${RALPH_LOG_LIB_DIR}/state.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${RALPH_LOG_LIB_DIR}/state.sh"
+fi
 
 _ralph_ts() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
@@ -63,4 +69,14 @@ ralph_event() {
       "${ts}" "${event_type}" "${status}" "${details}" "${RALPH_SESSION_ID:-}" "${RALPH_STEP:-}" "${RALPH_WORKSPACE:-}" \
       >> "${RALPH_EVENT_LOG_FILE}"
   fi
+}
+
+# Persists a user/hook choice to workspace state when state helpers are available.
+# Usage: ralph_state_choice "<hook>" "<choice>" ["details"]
+ralph_state_choice() {
+  local hook_name="$1"
+  local choice="$2"
+  local details="${3:-}"
+  command -v state_record_choice >/dev/null 2>&1 || return 0
+  state_record_choice "hook" "${hook_name}" "${choice}" "${details}" || true
 }

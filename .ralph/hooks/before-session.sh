@@ -13,6 +13,7 @@ set -euo pipefail
 
 HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLAN_SESSION_APPROVED=0
+IS_VERBOSE="${RALPH_VERBOSE:-0}"
 
 ## Loads shared logging helpers, with local fallback no-op implementations.
 setup_logging() {
@@ -48,6 +49,14 @@ setup_checkpoint() {
   fi
 }
 
+## Loads bootstrap helpers used for dependency checks and git init prompts.
+setup_bootstrap() {
+  if [[ -f "${HOOKS_DIR}/../lib/bootstrap.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${HOOKS_DIR}/../lib/bootstrap.sh"
+  fi
+}
+
 setup_colors() {
   C_RESET=""
   C_DIM=""
@@ -65,6 +74,22 @@ setup_colors() {
   fi
 }
 
+## Returns success when verbose logging is enabled.
+is_verbose() {
+  case "${IS_VERBOSE}" in
+    1|true|TRUE|yes|YES) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+## Logs INFO messages only in verbose mode.
+log_info_verbose() {
+  local scope="$1"
+  local message="$2"
+  is_verbose || return 0
+  ralph_log "INFO" "${scope}" "${message}"
+}
+
 ## Logs high-level session context before any checks/hooks run.
 log_session_start() {
   ralph_log "INFO" "before-session" "Session ${RALPH_SESSION_ID} starting"
@@ -75,6 +100,7 @@ log_session_start() {
     ralph_log "INFO" "before-session" "Max steps: ${RALPH_STEPS}"
   fi
 }
+
 
 ## Resolves the human-gate hook path (project-local preferred, then global).
 find_human_gate_hook() {
@@ -105,68 +131,13 @@ find_issues_hook() {
   fi
 }
 
-## Returns success when workspace is already a Git repository.
-is_git_repo() {
-  git -C "${RALPH_WORKSPACE}" rev-parse --is-inside-work-tree >/dev/null 2>&1
-}
-
-## Initializes a Git repository in the workspace and logs outcome.
-init_git_repo() {
-  if git -C "${RALPH_WORKSPACE}" init >/dev/null 2>&1; then
-    ralph_log "INFO" "before-session" "Initialized git repository"
-    return 0
-  fi
-
-  ralph_log "ERROR" "before-session" "Failed to initialize git repository"
-  return 1
-}
-
-## Ensures version control exists, optionally prompting user for git init.
-bootstrap_git_if_needed() {
-  if is_git_repo; then
-    return 0
-  fi
-
-  ralph_log "WARN" "before-session" "No git repository detected in workspace"
-
-  if [[ "${RALPH_HUMAN_GUARD_ASSUME_YES:-0}" == "1" ]]; then
-    if init_git_repo; then
-      ralph_event "git_bootstrap" "ok" "initialized via assume-yes"
-    else
-      ralph_event "git_bootstrap" "failed" "git init failed (assume-yes)"
-    fi
-    return 0
-  fi
-
-  if [[ ! -t 0 ]]; then
-    ralph_log "INFO" "before-session" "Non-interactive shell; skipping git bootstrap prompt"
-    ralph_event "git_bootstrap" "skipped" "non-interactive shell"
-    return 0
-  fi
-
-  read -r -p "No git repo found in ${RALPH_WORKSPACE}. Initialize now? [y/N]: " git_answer
-  case "${git_answer}" in
-    y|Y|yes|YES)
-      if init_git_repo; then
-        ralph_event "git_bootstrap" "ok" "initialized via human prompt"
-      else
-        ralph_event "git_bootstrap" "failed" "git init failed after prompt"
-      fi
-      ;;
-    *)
-      ralph_log "INFO" "before-session" "Git bootstrap skipped by user"
-      ralph_event "git_bootstrap" "skipped" "user declined"
-      ;;
-  esac
-}
-
 ## Runs optional issue adapter hook (jira/git/none) to enrich session context.
 run_issues_hook() {
   local issues_hook
   issues_hook="$(find_issues_hook)"
   [[ -z "${issues_hook}" ]] && return 0
 
-  ralph_log "INFO" "before-session" "Running issues hook"
+  log_info_verbose "before-session" "Running issues hook"
   if ! RALPH_HOOK_DEPTH="$(( ${RALPH_HOOK_DEPTH:-0} + 1 ))" "${issues_hook}"; then
     ralph_log "WARN" "before-session" "Issues hook failed; continuing without issue context"
     ralph_event "issues" "failed" "issues hook returned non-zero"
@@ -182,7 +153,7 @@ run_source_control_policy() {
   local created_branch
 
   if ! command -v sc_is_true >/dev/null 2>&1 || ! command -v sc_effective_backend >/dev/null 2>&1; then
-    ralph_log "INFO" "before-session" "Source-control helpers unavailable; skipping policy"
+    log_info_verbose "before-session" "Source-control helpers unavailable; skipping policy"
     return 0
   fi
 
@@ -193,13 +164,13 @@ run_source_control_policy() {
   template="${RALPH_SOURCE_CONTROL_BRANCH_NAME_TEMPLATE:-ralph/{ticket}/{goal_slug}/{session_id}}"
 
   if ! sc_is_true "${enabled}"; then
-    ralph_log "INFO" "before-session" "Source-control policy disabled"
+    log_info_verbose "before-session" "Source-control policy disabled"
     return 0
   fi
 
   backend="$(sc_effective_backend "${RALPH_WORKSPACE}" "${configured_backend}")"
   if [[ "${backend}" != "git" ]]; then
-    ralph_log "INFO" "before-session" "Source-control backend=${backend}; skipping git branch policy"
+    log_info_verbose "before-session" "Source-control backend=${backend}; skipping git branch policy"
     return 0
   fi
 
@@ -208,7 +179,7 @@ run_source_control_policy() {
   fi
 
   if [[ "${RALPH_DRY_RUN:-0}" == "1" ]]; then
-    ralph_log "INFO" "before-session" "DRY-RUN: would apply branch-per-session policy"
+    log_info_verbose "before-session" "DRY-RUN: would apply branch-per-session policy"
     return 0
   fi
 
@@ -296,7 +267,7 @@ run_planning_hook() {
   planning_hook="$(find_planning_hook)"
   [[ -z "${planning_hook}" ]] && return 0
 
-  ralph_log "INFO" "before-session" "Running planning hook"
+  log_info_verbose "before-session" "Running planning hook"
   if ! RALPH_HOOK_DEPTH="$(( ${RALPH_HOOK_DEPTH:-0} + 1 ))" "${planning_hook}"; then
     ralph_log "ERROR" "before-session" "Planning failed"
     ralph_event "planning" "failed" "planning hook returned non-zero"
@@ -315,11 +286,11 @@ regenerate_plan_with_feedback() {
 
   read -r -p "Describe what is missing in the plan: " feedback
   if [[ -z "${feedback}" ]]; then
-    ralph_log "INFO" "before-session" "No feedback provided; keeping current plan"
+    log_info_verbose "before-session" "No feedback provided; keeping current plan"
     return 0
   fi
 
-  ralph_log "INFO" "before-session" "Regenerating plan from feedback"
+  log_info_verbose "before-session" "Regenerating plan from feedback"
   if ! RALPH_PLAN_FORCE_REGENERATE=1 RALPH_PLAN_FEEDBACK="${feedback}" RALPH_HOOK_DEPTH="$(( ${RALPH_HOOK_DEPTH:-0} + 1 ))" "${planning_hook}"; then
     ralph_log "ERROR" "before-session" "Plan regeneration failed"
     ralph_event "plan_guard" "failed" "regeneration failed after feedback"
@@ -373,7 +344,7 @@ log_plan_status() {
 
   step_count=$(jq '.steps | length' "${plan_file}" 2>/dev/null || echo "?")
   pending_count=$(jq '[.steps[] | select(.status == "pending")] | length' "${plan_file}" 2>/dev/null || echo "?")
-  ralph_log "INFO" "before-session" "Plan: ${step_count} steps (${pending_count} pending)"
+  log_info_verbose "before-session" "Plan: ${step_count} steps (${pending_count} pending)"
 }
 
 ## Renders plan review inside a simple ASCII box for readability.
@@ -565,6 +536,7 @@ run_plan_approval_gate() {
     ralph_log "INFO" "before-session" "Plan has no pending steps; skipping plan approval"
     PLAN_SESSION_APPROVED=1
     ralph_event "plan_guard" "skipped" "plan already completed"
+    command -v ralph_state_choice >/dev/null 2>&1 && ralph_state_choice "before-session" "plan-approval-skipped" "plan already completed"
     return 0
   fi
 
@@ -573,12 +545,14 @@ run_plan_approval_gate() {
     PLAN_SESSION_APPROVED=1
     write_plan_approval_metadata "assume-yes"
     ralph_event "plan_guard" "approved" "assume-yes"
+    command -v ralph_state_choice >/dev/null 2>&1 && ralph_state_choice "before-session" "plan-approval-yes" "assume-yes"
     return 0
   fi
 
   if [[ ! -t 0 ]]; then
     ralph_log "WARN" "before-session" "Plan approval requires TTY; rejecting in non-interactive mode"
     ralph_event "plan_guard" "rejected" "non-interactive shell"
+    command -v ralph_state_choice >/dev/null 2>&1 && ralph_state_choice "before-session" "plan-approval-no" "non-interactive"
     return 1
   fi
 
@@ -592,6 +566,7 @@ run_plan_approval_gate() {
         PLAN_SESSION_APPROVED=1
         write_plan_approval_metadata "interactive"
         ralph_event "plan_guard" "approved" "human approved plan"
+        command -v ralph_state_choice >/dev/null 2>&1 && ralph_state_choice "before-session" "plan-approval-yes" "interactive"
         if [[ -t 1 ]]; then
           # Clear terminal after approval to reduce noise before step execution.
           printf '\033[2J\033[H'
@@ -601,15 +576,17 @@ run_plan_approval_gate() {
       2)
         ralph_log "WARN" "before-session" "Plan rejected by user"
         ralph_event "plan_guard" "rejected" "user declined"
+        command -v ralph_state_choice >/dev/null 2>&1 && ralph_state_choice "before-session" "plan-approval-no" "interactive"
         return 1
         ;;
       3)
+        command -v ralph_state_choice >/dev/null 2>&1 && ralph_state_choice "before-session" "plan-feedback" "interactive regenerate"
         if ! regenerate_plan_with_feedback; then
           return 1
         fi
         ;;
       *)
-        ralph_log "INFO" "before-session" "Invalid choice. Please select 1, 2, or 3."
+        log_info_verbose "before-session" "Invalid choice. Please select 1, 2, or 3."
         ;;
     esac
   done
@@ -621,9 +598,15 @@ main() {
   setup_ui
   setup_source_control
   setup_checkpoint
+  setup_bootstrap
   setup_colors
   log_session_start
-  bootstrap_git_if_needed
+  if command -v bootstrap_run_prereq_checks >/dev/null 2>&1; then
+    bootstrap_run_prereq_checks
+  fi
+  if command -v bootstrap_git_if_needed >/dev/null 2>&1; then
+    bootstrap_git_if_needed
+  fi
   run_issues_hook
 
   if ! run_source_control_policy; then
@@ -645,7 +628,7 @@ main() {
   fi
 
   log_plan_status
-  ralph_log "INFO" "before-session" "Ready"
+  log_info_verbose "before-session" "Ready"
   ralph_event "before_session" "ok" "session initialization completed"
 }
 

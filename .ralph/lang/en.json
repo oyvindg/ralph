@@ -1,0 +1,7 @@
+{
+  "wizard.workflow.prompt": "Select workflow type for this empty workspace:",
+  "wizard.workflow.coding": "Coding",
+  "wizard.workflow.project_management": "Project Management",
+  "wizard.workflow.finance": "Finance",
+  "wizard.workflow.non_code": "Non-code"
+}

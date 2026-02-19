@@ -1,0 +1,42 @@
+{
+  "tasks": {
+    "conditions": {
+      "workspace-empty": {
+        "run": "test -z \"$(find \"${RALPH_WORKSPACE}\" -mindepth 1 -maxdepth 1 ! -name '.git' ! -name '.ralph' -print -quit 2>/dev/null || true)\""
+      },
+      "workflow-not-set": {
+        "run": "test -z \"${RALPH_WORKFLOW_TYPE:-}\""
+      }
+    },
+    "workflow-coding": {
+      "when": "test -x \"${RALPH_PROJECT_DIR:-${RALPH_WORKSPACE}/.ralph}/lib/tasks/workflow-select.task.sh\"",
+      "run": "\"${RALPH_PROJECT_DIR:-${RALPH_WORKSPACE}/.ralph}/lib/tasks/workflow-select.task.sh\" coding",
+      "run_in_dry_run": false,
+      "allow_failure": true
+    },
+    "workflow-project-management": {
+      "when": "test -x \"${RALPH_PROJECT_DIR:-${RALPH_WORKSPACE}/.ralph}/lib/tasks/workflow-select.task.sh\"",
+      "run": "\"${RALPH_PROJECT_DIR:-${RALPH_WORKSPACE}/.ralph}/lib/tasks/workflow-select.task.sh\" project-management",
+      "run_in_dry_run": false,
+      "allow_failure": true
+    },
+    "workflow-finance": {
+      "when": "test -x \"${RALPH_PROJECT_DIR:-${RALPH_WORKSPACE}/.ralph}/lib/tasks/workflow-select.task.sh\"",
+      "run": "\"${RALPH_PROJECT_DIR:-${RALPH_WORKSPACE}/.ralph}/lib/tasks/workflow-select.task.sh\" finance",
+      "run_in_dry_run": false,
+      "allow_failure": true
+    },
+    "workflow-non-code": {
+      "when": "test -x \"${RALPH_PROJECT_DIR:-${RALPH_WORKSPACE}/.ralph}/lib/tasks/workflow-select.task.sh\"",
+      "run": "\"${RALPH_PROJECT_DIR:-${RALPH_WORKSPACE}/.ralph}/lib/tasks/workflow-select.task.sh\" non-code",
+      "run_in_dry_run": false,
+      "allow_failure": true
+    },
+    "version-control": {
+      "when": "test -x \"${RALPH_PROJECT_DIR:-${RALPH_WORKSPACE}/.ralph}/lib/tasks/version-control.task.sh\"",
+      "run": "RALPH_HOOK_DEPTH=\"$(( ${RALPH_HOOK_DEPTH:-0} + 1 ))\" \"${RALPH_PROJECT_DIR:-${RALPH_WORKSPACE}/.ralph}/lib/tasks/version-control.task.sh\"",
+      "run_in_dry_run": false,
+      "allow_failure": true
+    }
+  }
+}

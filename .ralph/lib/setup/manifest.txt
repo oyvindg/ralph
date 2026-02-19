@@ -1,0 +1,8 @@
+# Files and directories installed to ~/.ralph by install-global.sh
+profile.toml
+hooks.json
+tasks.json
+hooks/
+lib/
+lang/
+plans/

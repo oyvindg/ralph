@@ -1,27 +1,23 @@
 #!/usr/bin/env bash
-# Version-control hook
-#
-# Generates step-level change logs in:
-#   ${RALPH_CHANGE_LOG_FILE}
-#
-# Behavior:
-# - Uses generic version-control adapter (git if available, filesystem snapshot fallback otherwise)
-# - Writes source-control metadata + changed-file snapshot based on step marker
-# - Optionally creates step commits when source_control_allow_commits=1
-
+# Task wrapper for version-control step logging.
+# Keeps task execution logic in shell, while tasks.json stays declarative.
+# This task is the canonical implementation for step change logging.
 set -euo pipefail
 
-HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "${HOOKS_DIR}/../lib/log.sh" ]]; then
+TASK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$(cd "${TASK_DIR}/.." && pwd)"
+
+if [[ -f "${LIB_DIR}/log.sh" ]]; then
   # shellcheck disable=SC1091
-  source "${HOOKS_DIR}/../lib/log.sh"
+  source "${LIB_DIR}/log.sh"
 else
   ralph_log() { echo "[$2] $3"; }
   ralph_event() { :; }
 fi
-if [[ -f "${HOOKS_DIR}/../lib/source-control.sh" ]]; then
+
+if [[ -f "${LIB_DIR}/source-control.sh" ]]; then
   # shellcheck disable=SC1091
-  source "${HOOKS_DIR}/../lib/source-control.sh"
+  source "${LIB_DIR}/source-control.sh"
 else
   vcs_backend() { echo "filesystem-snapshot"; }
   vcs_ref() { echo "n/a"; }
@@ -49,10 +45,9 @@ list_changed_files_since_marker() {
     -print | sed "s#^${WORKSPACE}/##" | sort
 }
 
-# Generates a step-scoped change log using the best available VCS backend.
 main() {
   if [[ -z "${CHANGE_LOG_FILE}" ]]; then
-    ralph_log "WARN" "version-control" "RALPH_CHANGE_LOG_FILE not set; skipping"
+    ralph_log "WARN" "task.version-control" "RALPH_CHANGE_LOG_FILE not set; skipping"
     exit 0
   fi
 
@@ -112,8 +107,8 @@ main() {
   # Optional git checkpoint commit (policy-controlled).
   sc_commit_step_if_enabled "${WORKSPACE}" "${ALLOW_COMMITS}" "${STEP}" "${GOAL}" "${TICKET}" || true
 
-  ralph_log "INFO" "version-control" "Wrote change log: ${CHANGE_LOG_FILE}"
-  ralph_event "version_control" "ok" "change log generated"
+  ralph_log "INFO" "task.version-control" "Wrote change log: ${CHANGE_LOG_FILE}"
+  ralph_event "task_version_control" "ok" "change log generated"
 }
 
 main "$@"

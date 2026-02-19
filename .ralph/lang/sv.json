@@ -1,0 +1,7 @@
+{
+  "wizard.workflow.prompt": "Välj arbetsflöde för den här tomma arbetsytan:",
+  "wizard.workflow.coding": "Kodning",
+  "wizard.workflow.project_management": "Projektledning",
+  "wizard.workflow.finance": "Finans",
+  "wizard.workflow.non_code": "Icke-kod"
+}

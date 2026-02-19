@@ -32,6 +32,7 @@ STEPS="${RALPH_STEPS:-?}"
 SESSION_DIR="${RALPH_SESSION_DIR:-}"
 RESPONSE_FILE="${RALPH_RESPONSE_FILE:-}"
 DRY_RUN="${RALPH_DRY_RUN:-0}"
+IS_VERBOSE="${RALPH_VERBOSE:-0}"
 HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "${HOOKS_DIR}/../lib/log.sh" ]]; then
   # shellcheck disable=SC1091
@@ -45,22 +46,19 @@ if [[ -f "${HOOKS_DIR}/../lib/checkpoint.sh" ]]; then
   source "${HOOKS_DIR}/../lib/checkpoint.sh"
 fi
 
-# =============================================================================
-# Call Sub-Hook
-# =============================================================================
+# Returns success when verbose logging is enabled.
+is_verbose() {
+  case "${IS_VERBOSE}" in
+    1|true|TRUE|yes|YES) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
-call_hook() {
-  local hook_name="$1"
-  local hook_path="${HOOKS_DIR}/${hook_name}.sh"
-
-  if [[ -x "${hook_path}" ]]; then
-    ralph_log "INFO" "after-step" "Calling: ${hook_name}"
-    RALPH_HOOK_DEPTH="$(( ${RALPH_HOOK_DEPTH:-0} + 1 ))" "${hook_path}"
-    return $?
-  fi
-
-  ralph_log "INFO" "after-step" "Hook not found: ${hook_name}"
-  return 0
+# Logs INFO messages only in verbose mode.
+log_info_verbose() {
+  local message="$1"
+  is_verbose || return 0
+  ralph_log "INFO" "after-step" "${message}"
 }
 
 # =============================================================================
@@ -78,7 +76,7 @@ log_step_completion() {
     local lines words
     lines=$(wc -l < "${RESPONSE_FILE}")
     words=$(wc -w < "${RESPONSE_FILE}")
-    ralph_log "INFO" "after-step" "Response: ${lines} lines, ${words} words"
+    log_info_verbose "Response: ${lines} lines, ${words} words"
     ralph_event "after_step" "ok" "step=${STEP} lines=${lines} words=${words}"
   fi
 }
@@ -90,7 +88,7 @@ log_step_completion() {
 maybe_commit() {
   # Only commit if there are changes
   if ! git -C "${RALPH_WORKSPACE}" diff --quiet 2>/dev/null; then
-    ralph_log "INFO" "after-step" "Changes detected, could auto-commit here"
+    log_info_verbose "Changes detected, could auto-commit here"
     # Uncomment to enable auto-commit:
     # git -C "${RALPH_WORKSPACE}" add -A
     # git -C "${RALPH_WORKSPACE}" commit -m "Ralph step ${STEP}: auto-commit"
@@ -112,7 +110,7 @@ create_step_checkpoint() {
     "${STEP}" \
     "${RALPH_PLAN_FILE:-}" \
     "${RALPH_TICKET:-}" || true)"
-  [[ -n "${cp_path}" ]] && ralph_log "INFO" "after-step" "Checkpoint created: ${cp_path}"
+  [[ -n "${cp_path}" ]] && log_info_verbose "Checkpoint created: ${cp_path}"
 }
 
 # =============================================================================
@@ -122,16 +120,17 @@ create_step_checkpoint() {
 run_dry() {
   echo "[after-step] === DRY-RUN ==="
   echo "[after-step] Step ${STEP}/${STEPS}"
-  echo ""
-
-  echo "[after-step] Would do:"
-  echo "  - Log step completion"
-  echo "  - Record response metrics"
-  echo "  - Check for uncommitted changes"
-  echo ""
+  if is_verbose; then
+    echo ""
+    echo "[after-step] Would do:"
+    echo "  - Log step completion"
+    echo "  - Record response metrics"
+    echo "  - Check for uncommitted changes"
+    echo ""
+  fi
 
   # Show simulated metrics
-  if [[ -f "${RESPONSE_FILE}" ]]; then
+  if is_verbose && [[ -f "${RESPONSE_FILE}" ]]; then
     local lines words bytes
     lines=$(wc -l < "${RESPONSE_FILE}")
     words=$(wc -w < "${RESPONSE_FILE}")
@@ -142,8 +141,10 @@ run_dry() {
     echo "  - Bytes: ${bytes}"
   fi
 
-  echo ""
-  echo "[after-step] DRY-RUN: Complete"
+  if is_verbose; then
+    echo ""
+    echo "[after-step] DRY-RUN: Complete"
+  fi
   return 0
 }
 
@@ -160,16 +161,13 @@ main() {
 
   log_step_completion
 
-  # Optional hook: version-control snapshot/logging
-  call_hook "version-control" || true
-
   # Optional filesystem checkpoint snapshot
   create_step_checkpoint || true
 
   # Optional: auto-commit changes
   # maybe_commit
 
-  ralph_log "INFO" "after-step" "Done"
+  log_info_verbose "Done"
   exit 0
 }
 
