@@ -20,6 +20,13 @@ set -euo pipefail
 
 WORKSPACE="${RALPH_WORKSPACE:-.}"
 DRY_RUN="${RALPH_DRY_RUN:-0}"
+HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load parser for run_task/task_condition helpers
+if [[ -f "${HOOKS_DIR}/../lib/core/parser.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${HOOKS_DIR}/../lib/core/parser.sh"
+fi
 DRY_RUN_EXECUTE_TESTS="${RALPH_DRY_RUN_EXECUTE_TESTS:-0}"
 DRY_RUN_ACTIVE="${RALPH_TESTING_DRY_RUN_ACTIVE:-0}"
 SESSION_DIR="${RALPH_SESSION_DIR:-}"
@@ -179,69 +186,66 @@ run_with_isolated_test_env() {
 
 # =============================================================================
 # Test Runner Detection
+# Delegates to task:detect.* conditions from tasks.jsonc.
 # =============================================================================
 
 detect_make() {
-  [[ -f "${WORKSPACE}/Makefile" ]] && grep -q "^test:" "${WORKSPACE}/Makefile" 2>/dev/null
+  task_condition "detect.makefile-test"
 }
 
 detect_repo_test_runner() {
-  [[ -x "${WORKSPACE}/tests/run.sh" ]]
+  task_condition "detect.tests-run-sh"
 }
 
 detect_npm() {
-  [[ -f "${WORKSPACE}/package.json" ]] && \
-    grep -q '"test"' "${WORKSPACE}/package.json" 2>/dev/null
+  task_condition "detect.npm-test"
 }
 
 detect_pytest() {
-  command -v pytest >/dev/null 2>&1 || return 1
-  [[ -f "${WORKSPACE}/pytest.ini" ]] || \
-    [[ -f "${WORKSPACE}/setup.py" ]] || \
-    [[ -f "${WORKSPACE}/pyproject.toml" ]] || \
-    [[ -f "${WORKSPACE}/tox.ini" ]]
+  task_condition "detect.pytest"
 }
 
 detect_go() {
-  [[ -f "${WORKSPACE}/go.mod" ]]
+  task_condition "detect.go-mod"
 }
 
 detect_cargo() {
-  [[ -f "${WORKSPACE}/Cargo.toml" ]]
+  task_condition "detect.cargo"
 }
 
 # =============================================================================
 # Test Runners
+# Delegates to task:test.* commands from tasks.jsonc.
 # =============================================================================
 
 run_make_test() {
   t_log "Running: make test"
-  run_with_isolated_test_env make -C "${WORKSPACE}" test
+  run_with_isolated_test_env bash -c "source '${HOOKS_DIR}/../lib/core/parser.sh' && run_task 'test.make'"
 }
 
 run_repo_test_runner() {
   t_log "Running: tests/run.sh"
-  (cd "${WORKSPACE}" && run_with_isolated_test_env ./tests/run.sh)
+  run_with_isolated_test_env bash -c "source '${HOOKS_DIR}/../lib/core/parser.sh' && run_task 'test.repo-runner'"
 }
 
 run_npm_test() {
   t_log "Running: npm test"
-  run_with_isolated_test_env npm --prefix "${WORKSPACE}" test
+  run_with_isolated_test_env bash -c "source '${HOOKS_DIR}/../lib/core/parser.sh' && run_task 'test.npm'"
 }
 
 run_pytest() {
   t_log "Running: pytest"
-  (cd "${WORKSPACE}" && run_with_isolated_test_env pytest)
+  run_with_isolated_test_env bash -c "source '${HOOKS_DIR}/../lib/core/parser.sh' && run_task 'test.pytest'"
 }
 
 run_go_test() {
   t_log "Running: go test"
-  (cd "${WORKSPACE}" && run_with_isolated_test_env go test ./...)
+  run_with_isolated_test_env bash -c "source '${HOOKS_DIR}/../lib/core/parser.sh' && run_task 'test.go'"
 }
 
 run_cargo_test() {
   t_log "Running: cargo test"
-  (cd "${WORKSPACE}" && run_with_isolated_test_env cargo test)
+  run_with_isolated_test_env bash -c "source '${HOOKS_DIR}/../lib/core/parser.sh' && run_task 'test.cargo'"
 }
 
 # =============================================================================

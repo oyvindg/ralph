@@ -1,24 +1,19 @@
 #!/usr/bin/env bash
 # After session hook - runs once at session end
 #
-# Use for: reports, notifications, cleanup
+# NOTE: Core functionality moved to tasks.jsonc (session.* tasks)
+# This shell hook is kept for backwards compatibility and custom extensions.
+#
+# To add custom after-session behavior:
+# - Option 1: Add tasks to tasks.jsonc and reference from hooks.jsonc
+# - Option 2: Uncomment and modify the examples below
+#
+# See: .ralph/hooks.jsonc -> after-session
+# See: .ralph/tasks.jsonc -> session.*
 
 set -euo pipefail
 
-HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "${HOOKS_DIR}/../lib/log.sh" ]]; then
-  # shellcheck disable=SC1091
-  source "${HOOKS_DIR}/../lib/log.sh"
-else
-  ralph_log() { echo "[$2] $3"; }
-  ralph_event() { :; }
-fi
-
-ralph_log "INFO" "after-session" "Session ${RALPH_SESSION_ID} completed"
-ralph_log "INFO" "after-session" "Summary: ${RALPH_SESSION_DIR}/summary.md"
-ralph_event "session" "completed" "summary=${RALPH_SESSION_DIR}/summary.md"
-
-# Example: Send summary notification
+# Example: Send Slack notification
 # curl -s -X POST "https://hooks.slack.com/..." \
 #   -d "{\"text\":\"Ralph session completed: ${RALPH_SESSION_ID}\"}" || true
 

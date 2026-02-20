@@ -10,7 +10,7 @@ export ROOT="${ROOT_DIR}"
 unset DRY_RUN || true
 
 # shellcheck disable=SC1091
-source "${ROOT_DIR}/.ralph/lib/core/hooks-parser.sh"
+source "${ROOT_DIR}/.ralph/lib/core/parser.sh"
 
 set +e
 run_json_hook_command_entry \

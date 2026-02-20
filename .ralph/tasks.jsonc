@@ -1,13 +1,190 @@
 {
   "tasks": {
+    // Gate responses for select options (approve/reject confirmations)
+    "gate": {
+      "approve": { "run": "true" },
+      "reject": { "run": "false" }
+    },
+
+    // Session lifecycle tasks
+    "session": {
+      "log-completed": {
+        "run": "echo \"[after-session] Session ${RALPH_SESSION_ID} completed\""
+      },
+      "log-summary": {
+        "run": "echo \"[after-session] Summary: ${RALPH_SESSION_DIR}/summary.md\""
+      },
+      "write-hooks-log": {
+        "run": "test -n \"${RALPH_SESSION_DIR}\" && printf '%s [INFO] [after-session] Session %s completed\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \"${RALPH_SESSION_ID}\" >> \"${RALPH_SESSION_DIR}/hooks.log\" || true"
+      },
+      "write-event": {
+        "run": "test -n \"${RALPH_SESSION_DIR}\" && printf '{\"timestamp\":\"%s\",\"type\":\"session\",\"status\":\"completed\",\"session_id\":\"%s\"}\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \"${RALPH_SESSION_ID}\" >> \"${RALPH_SESSION_DIR}/events.jsonl\" || true"
+      }
+    },
+
+    // Reusable condition checks for hooks/tasks
     "conditions": {
       "workspace-empty": {
+        // True when workspace has no tracked content (ignores .git/.ralph)
         "run": "test -z \"$(find \"${RALPH_WORKSPACE}\" -mindepth 1 -maxdepth 1 ! -name '.git' ! -name '.ralph' -print -quit 2>/dev/null || true)\""
       },
       "workflow-not-set": {
+        // True when no workflow type has been selected
         "run": "test -z \"${RALPH_WORKFLOW_TYPE:-}\""
+      },
+      // Response file conditions (used in quality-gate)
+      "response-exists": {
+        "run": "test -f \"${RALPH_RESPONSE_FILE}\""
+      },
+      "response-not-empty": {
+        "run": "test -s \"${RALPH_RESPONSE_FILE}\""
       }
     },
+
+    // Git repository checks and helpers
+    "git": {
+      "is-repo": {
+        // Exit 0 if workspace is inside a git repository
+        "run": "git -C \"${RALPH_WORKSPACE:-.}\" rev-parse --is-inside-work-tree >/dev/null 2>&1"
+      },
+      "has-changes": {
+        // Exit 0 if there are uncommitted changes
+        "run": "test -n \"$(git -C \"${RALPH_WORKSPACE:-.}\" status --porcelain 2>/dev/null)\""
+      },
+      "branch": {
+        // Print current branch name (or 'detached')
+        "run": "git -C \"${RALPH_WORKSPACE:-.}\" symbolic-ref --quiet --short HEAD 2>/dev/null || echo 'detached'"
+      },
+      "head-short": {
+        // Print short commit hash
+        "run": "git -C \"${RALPH_WORKSPACE:-.}\" rev-parse --short HEAD 2>/dev/null || echo 'unknown'"
+      },
+      "status-short": {
+        // Print short git status
+        "run": "git -C \"${RALPH_WORKSPACE:-.}\" status --short 2>/dev/null || true"
+      },
+      "diff-stat": {
+        // Print diff statistics
+        "run": "git -C \"${RALPH_WORKSPACE:-.}\" diff --stat 2>/dev/null || true"
+      }
+    },
+
+    // AI engines - detection, running, and metadata
+    // Priority order for auto-detect is defined by "priority" (lower = preferred)
+    "engines": [
+      {
+        "code": "codex",
+        "label": "OpenAI Codex CLI",
+        "priority": 1,
+        "detect": "command -v codex >/dev/null 2>&1",
+        "run": "codex exec --full-auto -C \"${RALPH_WORKSPACE:-.}\" ${RALPH_MODEL:+--model ${RALPH_MODEL}} -o \"${RALPH_RESPONSE_FILE}\" - < \"${RALPH_PROMPT_FILE}\"",
+        "model_pattern": "^(gpt|codex|o1|o3)"
+      },
+      {
+        "code": "claude",
+        "label": "Claude Code CLI",
+        "priority": 2,
+        "detect": "command -v claude >/dev/null 2>&1",
+        "run": "claude ${RALPH_MODEL:+--model ${RALPH_MODEL}} -p \"$(cat \"${RALPH_PROMPT_FILE}\")\" > \"${RALPH_RESPONSE_FILE}\"",
+        "model_pattern": "^claude"
+      },
+      {
+        "code": "ollama",
+        "label": "Local models via Ollama",
+        "priority": 3,
+        "detect": "command -v ollama >/dev/null 2>&1 && ollama list >/dev/null 2>&1",
+        "run": "ollama run \"${RALPH_MODEL:-deepseek-coder}\" < \"${RALPH_PROMPT_FILE}\" > \"${RALPH_RESPONSE_FILE}\""
+      },
+      {
+        "code": "openai",
+        "label": "OpenAI API",
+        "priority": 4,
+        "detect": "test -n \"${OPENAI_API_KEY:-}\"",
+        "run": "curl -s https://api.openai.com/v1/chat/completions -H \"Authorization: Bearer ${OPENAI_API_KEY}\" -H \"Content-Type: application/json\" -d \"{\\\"model\\\": \\\"${RALPH_MODEL:-gpt-4}\\\", \\\"messages\\\": [{\\\"role\\\": \\\"user\\\", \\\"content\\\": $(jq -Rs . < \"${RALPH_PROMPT_FILE}\")}]}\" | jq -r '.choices[0].message.content' > \"${RALPH_RESPONSE_FILE}\"",
+        "model_pattern": "^(gpt|o1|o3)"
+      },
+      {
+        "code": "anthropic",
+        "label": "Anthropic API",
+        "priority": 5,
+        "detect": "test -n \"${ANTHROPIC_API_KEY:-}\"",
+        "run": "curl -s https://api.anthropic.com/v1/messages -H \"x-api-key: ${ANTHROPIC_API_KEY}\" -H \"anthropic-version: 2023-06-01\" -H \"Content-Type: application/json\" -d \"{\\\"model\\\": \\\"${RALPH_MODEL:-claude-sonnet-4-20250514}\\\", \\\"max_tokens\\\": 4096, \\\"messages\\\": [{\\\"role\\\": \\\"user\\\", \\\"content\\\": $(jq -Rs . < \"${RALPH_PROMPT_FILE}\")}]}\" | jq -r '.content[0].text' > \"${RALPH_RESPONSE_FILE}\"",
+        "model_pattern": "^claude"
+      },
+      {
+        "code": "mock",
+        "label": "Simulated responses (testing)",
+        "priority": 99,
+        "detect": "true",
+        "run": "task:engine.mock.generate"
+      }
+    ],
+
+    // Mock engine helper (complex logic kept in task)
+    "engine": {
+      "mock": {
+        "generate": {
+          "run": "printf '##### Mock AI Response\\n\\n**Generated:** %s\\n**Engine:** mock\\n**Model:** %s\\n\\n---\\n\\nThis is a simulated response for testing.\\n' \"$(date -u +%Y-%m-%dT%H:%M:%SZ)\" \"${RALPH_MODEL:-default}\" > \"${RALPH_RESPONSE_FILE}\""
+        }
+      }
+    },
+
+    // Test runner detection conditions
+    "detect": {
+      "makefile-test": {
+        // True if Makefile exists with test target
+        "run": "test -f \"${RALPH_WORKSPACE}/Makefile\" && grep -q '^test:' \"${RALPH_WORKSPACE}/Makefile\" 2>/dev/null"
+      },
+      "npm-test": {
+        // True if package.json has test script
+        "run": "test -f \"${RALPH_WORKSPACE}/package.json\" && grep -q '\"test\"' \"${RALPH_WORKSPACE}/package.json\" 2>/dev/null"
+      },
+      "pytest": {
+        // True if pytest is available and project has Python config
+        "run": "command -v pytest >/dev/null 2>&1 && (test -f \"${RALPH_WORKSPACE}/pytest.ini\" || test -f \"${RALPH_WORKSPACE}/setup.py\" || test -f \"${RALPH_WORKSPACE}/pyproject.toml\" || test -f \"${RALPH_WORKSPACE}/tox.ini\")"
+      },
+      "go-mod": {
+        // True if go.mod exists
+        "run": "test -f \"${RALPH_WORKSPACE}/go.mod\""
+      },
+      "cargo": {
+        // True if Cargo.toml exists
+        "run": "test -f \"${RALPH_WORKSPACE}/Cargo.toml\""
+      },
+      "tests-run-sh": {
+        // True if tests/run.sh exists and is executable
+        "run": "test -x \"${RALPH_WORKSPACE}/tests/run.sh\""
+      }
+    },
+
+    // Test runner commands
+    "test": {
+      "make": {
+        "when": "task:detect.makefile-test",
+        "run": "make -C \"${RALPH_WORKSPACE}\" test"
+      },
+      "npm": {
+        "when": "task:detect.npm-test",
+        "run": "npm --prefix \"${RALPH_WORKSPACE}\" test"
+      },
+      "pytest": {
+        "when": "task:detect.pytest",
+        "run": "cd \"${RALPH_WORKSPACE}\" && pytest"
+      },
+      "go": {
+        "when": "task:detect.go-mod",
+        "run": "cd \"${RALPH_WORKSPACE}\" && go test ./..."
+      },
+      "cargo": {
+        "when": "task:detect.cargo",
+        "run": "cd \"${RALPH_WORKSPACE}\" && cargo test"
+      },
+      "repo-runner": {
+        "when": "task:detect.tests-run-sh",
+        "run": "cd \"${RALPH_WORKSPACE}\" && ./tests/run.sh"
+      }
+    },
+    // Workflow selection tasks (optional; skipped if script is missing)
     "workflow-coding": {
       "when": "test -x \"${RALPH_PROJECT_DIR:-${RALPH_WORKSPACE}/.ralph}/lib/tasks/workflow-select.task.sh\"",
       "run": "\"${RALPH_PROJECT_DIR:-${RALPH_WORKSPACE}/.ralph}/lib/tasks/workflow-select.task.sh\" coding",
@@ -32,26 +209,33 @@
       "run_in_dry_run": false,
       "allow_failure": true
     },
+    // Optional version-control hook behavior
     "version-control": {
       "when": "test -x \"${RALPH_PROJECT_DIR:-${RALPH_WORKSPACE}/.ralph}/lib/tasks/version-control.task.sh\"",
       "run": "RALPH_HOOK_DEPTH=\"$(( ${RALPH_HOOK_DEPTH:-0} + 1 ))\" \"${RALPH_PROJECT_DIR:-${RALPH_WORKSPACE}/.ralph}/lib/tasks/version-control.task.sh\"",
       "run_in_dry_run": false,
       "allow_failure": true
     },
+    // Version/commit reporting helpers
     "version": {
       "git-rev-short": {
+        // Prints short commit hash if git is available
         "run": "git -C \"${repo_root:-.}\" rev-parse --short HEAD 2>/dev/null || true"
       },
       "has-git": {
+        // Exit 0 if git repo is present and readable
         "run": "git -C \"${repo_root:-.}\" rev-parse --short HEAD >/dev/null 2>&1"
       },
       "print-with-commit": {
+        // Print version with current commit hash
         "run": "echo \"ralph ${RALPH_VERSION} (commit: $(git -C \"${repo_root:-.}\" rev-parse --short HEAD))\""
       },
       "print-simple": {
+        // Print version without git info
         "run": "echo \"ralph ${RALPH_VERSION}\""
       },
       "print": {
+        // Prefer commit-aware output when possible
         "run": "task:version.has-git && task:version.print-with-commit || task:version.print-simple"
       }
     }

@@ -17,7 +17,7 @@ git -C "${TMP_REPO}" commit -m "init" -q
 TASKS_FILE="${ROOT_DIR}/.ralph/tasks.jsonc"
 
 # shellcheck disable=SC1091
-source "${ROOT_DIR}/.ralph/lib/core/hooks-parser.sh"
+source "${ROOT_DIR}/.ralph/lib/core/parser.sh"
 
 cmd="$(json_hook_when_task_command "version.git-rev-short" "${TASKS_FILE}")"
 assert_ne "" "${cmd}" "version.git-rev-short should resolve to a command"

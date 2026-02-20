@@ -32,9 +32,9 @@ load_libs() {
     # shellcheck disable=SC1091
     source "${HOOKS_DIR}/../lib/json.sh"
   fi
-  if [[ -f "${HOOKS_DIR}/../lib/core/hooks-parser.sh" ]]; then
+  if [[ -f "${HOOKS_DIR}/../lib/core/parser.sh" ]]; then
     # shellcheck disable=SC1091
-    source "${HOOKS_DIR}/../lib/core/hooks-parser.sh"
+    source "${HOOKS_DIR}/../lib/core/parser.sh"
   fi
 }
 

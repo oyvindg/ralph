@@ -759,12 +759,16 @@ build_merged_tasks_json() {
 expand_json_hook_task() {
   local payload="$1"
   local tasks_file="$2"
-  local ref task_json
+  local ref task_json norm_tasks
 
   ref="$(printf '%s' "${payload}" | jq -r '.task // empty' 2>/dev/null || true)"
   ref="$(json_hook_normalize_task_ref "${ref}")"
   [[ -n "${ref}" ]] || { printf '%s\n' "${payload}"; return 0; }
   [[ -n "${tasks_file}" && -f "${tasks_file}" ]] || { printf '%s\n' "${payload}"; return 0; }
+
+  # Normalize JSONC to JSON for jq parsing
+  norm_tasks="$(json_like_to_temp_file "${tasks_file}" 2>/dev/null || true)"
+  [[ -n "${norm_tasks}" && -f "${norm_tasks}" ]] || { printf '%s\n' "${payload}"; return 0; }
 
   task_json="$(jq -c --arg ref "${ref}" '
     def dotted_path_lookup($obj; $ref):
@@ -775,15 +779,17 @@ expand_json_hook_task() {
     if (.tasks|type) == "object" then (dotted_path_lookup(.tasks; $ref) // empty)
     elif (.tasks|type) == "array" then ([.tasks[] | select((.code // "") == $ref)][0] // empty)
     else empty end
-  ' "${tasks_file}" 2>/dev/null || true)"
+  ' "${norm_tasks}" 2>/dev/null || true)"
 
   if [[ -z "${task_json}" || "${task_json}" == "null" ]]; then
+    rm -f "${norm_tasks}"
     echo "${C_YELLOW}[hooks.json]${C_RESET} task not found: ${ref}" >&2
     printf '%s\n' "${payload}"
     return 0
   fi
 
-  jq -cn --argjson task "${task_json}" --argjson cmd "${payload}" '
+  local result
+  result="$(jq -cn --argjson task "${task_json}" --argjson cmd "${payload}" '
     def deepmerge($a; $b):
       if ($a|type) == "object" and ($b|type) == "object" then
         reduce (($a + $b) | keys_unsorted[]) as $k
@@ -806,7 +812,9 @@ expand_json_hook_task() {
         | if (.default_yes // false) == false then del(.default_yes) else . end
       );
     deepmerge($task; clean($cmd))
-  ' 2>/dev/null || printf '%s\n' "${payload}"
+  ' 2>/dev/null || printf '%s\n' "${payload}")"
+  rm -f "${norm_tasks}"
+  printf '%s\n' "${result}"
 }
 
 # Normalizes task reference formats to dotted task key.
@@ -825,6 +833,49 @@ json_hook_normalize_task_ref() {
   fi
   ref="${ref#tasks.}"
   printf '%s\n' "${ref}"
+}
+
+# Runs a task from tasks.jsonc by reference path.
+# Usage: run_task "git.is-repo" [tasks_file]
+# Returns: exit code of the task command
+run_task() {
+  local ref="$1"
+  local tasks_file="${2:-${RALPH_TASKS_FILE:-}}"
+  local cmd cwd_abs
+
+  # Resolve tasks file if not provided
+  if [[ -z "${tasks_file}" || ! -f "${tasks_file}" ]]; then
+    local root="${ROOT:-${RALPH_WORKSPACE:-.}}"
+    if [[ -f "${root}/.ralph/tasks.jsonc" ]]; then
+      tasks_file="${root}/.ralph/tasks.jsonc"
+    elif [[ -f "${root}/.ralph/tasks.json" ]]; then
+      tasks_file="${root}/.ralph/tasks.json"
+    else
+      echo "[run_task] tasks file not found" >&2
+      return 1
+    fi
+  fi
+
+  cmd="$(json_hook_when_task_command "${ref}" "${tasks_file}")"
+  if [[ -z "${cmd}" ]]; then
+    echo "[run_task] task not found: ${ref}" >&2
+    return 1
+  fi
+
+  cwd_abs="${ROOT:-${RALPH_WORKSPACE:-.}}"
+  (
+    cd "${cwd_abs}"
+    bash -lc "${cmd}"
+  )
+}
+
+# Checks if a task condition passes (exit 0) without output.
+# Usage: task_condition "git.is-repo" && echo "yes"
+task_condition() {
+  local ref="$1"
+  local tasks_file="${2:-${RALPH_TASKS_FILE:-}}"
+
+  run_task "${ref}" "${tasks_file}" >/dev/null 2>&1
 }
 
 # Executes hooks.json commands for event + phase.

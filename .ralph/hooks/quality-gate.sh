@@ -42,6 +42,12 @@ else
   ralph_event() { :; }
 fi
 
+# Load parser for run_task/task_condition helpers
+if [[ -f "${HOOKS_DIR}/../lib/core/parser.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${HOOKS_DIR}/../lib/core/parser.sh"
+fi
+
 # =============================================================================
 # Call Sub-Hook
 # =============================================================================
@@ -67,14 +73,14 @@ call_hook() {
 check_response() {
   ralph_log "INFO" "quality-gate" "Checking response"
 
-  # Check exists
-  if [[ ! -f "${RESPONSE_FILE}" ]]; then
+  # Check exists (uses task:conditions.response-exists)
+  if ! task_condition "conditions.response-exists"; then
     ralph_log "ERROR" "quality-gate" "Response file missing"
     return 1
   fi
 
-  # Check not empty
-  if [[ ! -s "${RESPONSE_FILE}" ]]; then
+  # Check not empty (uses task:conditions.response-not-empty)
+  if ! task_condition "conditions.response-not-empty"; then
     ralph_log "ERROR" "quality-gate" "Response is empty"
     return 1
   fi

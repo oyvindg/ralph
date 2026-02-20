@@ -10,12 +10,12 @@
             {
               "code": "approve",
               "label": "{human.gate.approve}",
-              "run": "true"
+              "run": "task:gate.approve"
             },
             {
               "code": "reject",
               "label": "{human.gate.reject}",
-              "run": "false"
+              "run": "task:gate.reject"
             }
           ]
         }
@@ -67,12 +67,12 @@
             {
               "code": "overwrite",
               "label": "{plan.overwrite.yes}",
-              "run": "true"
+              "run": "task:gate.approve"
             },
             {
               "code": "cancel",
               "label": "{plan.overwrite.no}",
-              "run": "false"
+              "run": "task:gate.reject"
             }
           ]
         }
@@ -86,6 +86,16 @@
       {
         "run": "task:version-control"
       }
+    ]
+  },
+
+  // after-session hooks run once at session end
+  "after-session": {
+    "system": [
+      { "run": "task:session.log-completed" },
+      { "run": "task:session.log-summary" },
+      { "run": "task:session.write-hooks-log", "allow_failure": true },
+      { "run": "task:session.write-event", "allow_failure": true }
     ]
   }
 }

@@ -8,7 +8,7 @@ source "${ROOT_DIR}/tests/lib/assert.sh"
 
 export ROOT="${ROOT_DIR}"
 # shellcheck disable=SC1091
-source "${ROOT_DIR}/.ralph/lib/core/hooks-parser.sh"
+source "${ROOT_DIR}/.ralph/lib/core/parser.sh"
 
 set +e
 json_hook_when_matches "" "" ""

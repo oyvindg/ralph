@@ -128,9 +128,9 @@ version_task_command() {
   ROOT="${saved_root}"
 
   [[ -n "${tasks_file}" && -f "${tasks_file}" ]] || return 1
-  [[ -f "${SCRIPT_DIR}/.ralph/lib/core/hooks-parser.sh" ]] || return 1
+  [[ -f "${SCRIPT_DIR}/.ralph/lib/core/parser.sh" ]] || return 1
   # shellcheck disable=SC1091
-  source "${SCRIPT_DIR}/.ralph/lib/core/hooks-parser.sh"
+  source "${SCRIPT_DIR}/.ralph/lib/core/parser.sh"
 
   cmd="$(json_hook_when_task_command "version.print" "${tasks_file}")"
   [[ -n "${cmd}" ]] || return 1
@@ -307,7 +307,7 @@ load_core_libs() {
     "core/session.sh"
     "core/step-hooks.sh"
     "core/plan-selection.sh"
-    "core/hooks-parser.sh"
+    "core/parser.sh"
   )
   local rel lib_path
   for rel in "${libs[@]}"; do
@@ -443,7 +443,7 @@ resolve_agent_for_step() {
 # Configuration, plan selection, and hooks.json command helpers are loaded from:
 # - `.ralph/lib/core/config.sh`
 # - `.ralph/lib/core/plan-selection.sh`
-# - `.ralph/lib/core/hooks-parser.sh`
+# - `.ralph/lib/core/parser.sh`
 
 # Plan helpers are loaded from:
 # - `.ralph/lib/core/plan.sh`

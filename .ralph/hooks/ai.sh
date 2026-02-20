@@ -4,15 +4,7 @@
 # =============================================================================
 #
 # Executes AI model based on RALPH_ENGINE environment variable.
-# Automatically detects available engines on the system.
-#
-# Supported engines:
-#   - codex      OpenAI Codex CLI (default)
-#   - claude     Claude Code CLI
-#   - ollama     Local models via Ollama
-#   - openai     OpenAI API direct (requires OPENAI_API_KEY)
-#   - anthropic  Anthropic API direct (requires ANTHROPIC_API_KEY)
-#   - mock       Simulated responses for testing/dry-run
+# Engine definitions are loaded from tasks.jsonc (engines array).
 #
 # Environment variables:
 #   RALPH_ENGINE        Engine to use (default: auto-detect)
@@ -42,35 +34,73 @@ PROMPT_FILE="${RALPH_PROMPT_FILE:-}"
 RESPONSE_FILE="${RALPH_RESPONSE_FILE:-}"
 MODEL="${RALPH_MODEL:-}"
 WORKSPACE="${RALPH_WORKSPACE:-.}"
+HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TASKS_FILE="${RALPH_TASKS_FILE:-${WORKSPACE}/.ralph/tasks.jsonc}"
+
+# Load parser for task helpers
+if [[ -f "${HOOKS_DIR}/../lib/core/parser.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${HOOKS_DIR}/../lib/core/parser.sh"
+fi
 
 # =============================================================================
-# Engine Detection
+# Engine Discovery (from tasks.jsonc)
 # =============================================================================
 
-detect_codex() {
-  command -v codex >/dev/null 2>&1
+# Get normalized tasks JSON
+get_tasks_json() {
+  local norm
+  norm="$(json_like_to_temp_file "${TASKS_FILE}" 2>/dev/null || true)"
+  if [[ -n "${norm}" && -f "${norm}" ]]; then
+    echo "${norm}"
+  fi
 }
 
-detect_claude() {
-  command -v claude >/dev/null 2>&1
+# List all engine codes from tasks.jsonc
+get_engine_codes() {
+  local tasks_json
+  tasks_json="$(get_tasks_json)"
+  [[ -n "${tasks_json}" ]] || return 1
+  jq -r '.engines[]? | .code' "${tasks_json}" 2>/dev/null
+  rm -f "${tasks_json}"
 }
 
-detect_ollama() {
-  command -v ollama >/dev/null 2>&1 && \
-    ollama list >/dev/null 2>&1
+# Get engine property by code
+get_engine_prop() {
+  local code="$1"
+  local prop="$2"
+  local tasks_json
+  tasks_json="$(get_tasks_json)"
+  [[ -n "${tasks_json}" ]] || return 1
+  local val
+  val="$(jq -r --arg code "${code}" --arg prop "${prop}" \
+    '.engines[]? | select(.code == $code) | .[$prop] // empty' "${tasks_json}" 2>/dev/null)"
+  rm -f "${tasks_json}"
+  echo "${val}"
 }
 
-detect_openai() {
-  [[ -n "${OPENAI_API_KEY:-}" ]]
+# Check if engine is available
+engine_available() {
+  local code="$1"
+  local detect_cmd
+  detect_cmd="$(get_engine_prop "${code}" "detect")"
+  [[ -n "${detect_cmd}" ]] || return 1
+  bash -c "${detect_cmd}" >/dev/null 2>&1
 }
 
-detect_anthropic() {
-  [[ -n "${ANTHROPIC_API_KEY:-}" ]]
-}
+# Run engine
+run_engine() {
+  local code="$1"
+  local run_cmd
+  run_cmd="$(get_engine_prop "${code}" "run")"
+  [[ -n "${run_cmd}" ]] || { echo "[ai] ERROR: No run command for engine: ${code}" >&2; return 1; }
 
-# Mock is always available
-detect_mock() {
-  return 0
+  # Expand task references if present
+  if [[ "${run_cmd}" == task:* ]]; then
+    run_task "${run_cmd#task:}"
+  else
+    bash -c "${run_cmd}"
+  fi
 }
 
 # =============================================================================
@@ -81,39 +111,20 @@ list_engines() {
   echo "Available AI engines:"
   echo ""
 
-  if detect_codex; then
-    echo "  [x] codex      - OpenAI Codex CLI"
-  else
-    echo "  [ ] codex      - OpenAI Codex CLI (not installed)"
-  fi
+  local tasks_json code label detect_cmd
+  tasks_json="$(get_tasks_json)"
+  [[ -n "${tasks_json}" ]] || { echo "  (no engines defined in tasks.jsonc)"; return 0; }
 
-  if detect_claude; then
-    echo "  [x] claude     - Claude Code CLI"
-  else
-    echo "  [ ] claude     - Claude Code CLI (not installed)"
-  fi
+  while IFS=$'\t' read -r code label; do
+    [[ -n "${code}" ]] || continue
+    if engine_available "${code}"; then
+      echo "  [x] ${code} - ${label}"
+    else
+      echo "  [ ] ${code} - ${label} (not available)"
+    fi
+  done < <(jq -r '.engines[]? | [.code, .label] | @tsv' "${tasks_json}" 2>/dev/null)
 
-  if detect_ollama; then
-    local models
-    models=$(ollama list 2>/dev/null | tail -n +2 | awk '{print $1}' | tr '\n' ', ' | sed 's/,$//')
-    echo "  [x] ollama     - Local models: ${models:-none}"
-  else
-    echo "  [ ] ollama     - Local models (not running)"
-  fi
-
-  if detect_openai; then
-    echo "  [x] openai     - OpenAI API (key set)"
-  else
-    echo "  [ ] openai     - OpenAI API (OPENAI_API_KEY not set)"
-  fi
-
-  if detect_anthropic; then
-    echo "  [x] anthropic  - Anthropic API (key set)"
-  else
-    echo "  [ ] anthropic  - Anthropic API (ANTHROPIC_API_KEY not set)"
-  fi
-
-  echo "  [x] mock       - Simulated responses (always available)"
+  rm -f "${tasks_json}"
   echo ""
 }
 
@@ -122,230 +133,22 @@ list_engines() {
 # =============================================================================
 
 auto_detect_engine() {
-  # Priority: codex > claude > ollama > openai > anthropic
-  if detect_codex; then
-    echo "codex"
-  elif detect_claude; then
-    echo "claude"
-  elif detect_ollama; then
-    echo "ollama"
-  elif detect_openai; then
-    echo "openai"
-  elif detect_anthropic; then
-    echo "anthropic"
-  else
-    echo ""
-  fi
-}
+  local tasks_json code
+  tasks_json="$(get_tasks_json)"
+  [[ -n "${tasks_json}" ]] || return 1
 
-# =============================================================================
-# Engine: Mock (Simulated)
-# =============================================================================
-# Generates realistic stub responses for testing and dry-run mode.
-# Supports failure simulation for testing error handling.
-#
-# Environment variables:
-#   RALPH_MOCK_FAIL=1       Force mock to fail
-#   RALPH_MOCK_FAIL_RATE=N  Random failure rate (0-100, e.g., 30 = 30%)
-#   RALPH_MOCK_EMPTY=1      Generate empty response
-#   RALPH_MOCK_ERROR=1      Generate response with error markers
-#
-run_mock() {
-  # Check for forced failure
-  if [[ "${RALPH_MOCK_FAIL:-0}" == "1" ]]; then
-    echo "[ai] MOCK: Simulating AI failure"
-    return 1
-  fi
-
-  # Check for random failure
-  if [[ -n "${RALPH_MOCK_FAIL_RATE:-}" ]]; then
-    local rand=$((RANDOM % 100))
-    if [[ "${rand}" -lt "${RALPH_MOCK_FAIL_RATE}" ]]; then
-      echo "[ai] MOCK: Random failure (${rand} < ${RALPH_MOCK_FAIL_RATE}%)"
-      return 1
+  # Iterate engines sorted by priority
+  while IFS= read -r code; do
+    [[ -n "${code}" ]] || continue
+    if engine_available "${code}"; then
+      rm -f "${tasks_json}"
+      echo "${code}"
+      return 0
     fi
-  fi
+  done < <(jq -r '.engines | sort_by(.priority)[]? | .code' "${tasks_json}" 2>/dev/null)
 
-  # Check for empty response simulation
-  if [[ "${RALPH_MOCK_EMPTY:-0}" == "1" ]]; then
-    echo "[ai] MOCK: Generating empty response"
-    : > "${RESPONSE_FILE}"
-    return 0
-  fi
-
-  local prompt_preview
-  prompt_preview=$(head -c 200 "${PROMPT_FILE}" | tr '\n' ' ')
-
-  local timestamp
-  timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-  # Check for error response simulation
-  if [[ "${RALPH_MOCK_ERROR:-0}" == "1" ]]; then
-    cat > "${RESPONSE_FILE}" <<EOF
-##### Mock AI Response (WITH ERRORS)
-
-**Generated:** ${timestamp}
-**Engine:** mock (simulated error)
-
----
-
-##### Error Simulation
-
-ERROR: Simulated error in AI response
-FAILED: Mock failure for testing
-Exception: TestException - this is a simulated error
-
-##### Prompt preview:
-> ${prompt_preview}...
-
----
-
-*This response simulates an error condition for testing.*
-EOF
-    echo "[ai] MOCK: Generated error response"
-    return 0
-  fi
-
-  # Normal mock response
-  cat > "${RESPONSE_FILE}" <<EOF
-##### Mock AI Response
-
-**Generated:** ${timestamp}
-**Engine:** mock (simulated)
-**Model:** ${MODEL:-default}
-
----
-
-##### Summary
-
-This is a simulated response for testing purposes.
-
-**Prompt preview:**
-> ${prompt_preview}...
-
-##### Actions Taken
-
-- [mock] Analyzed the prompt
-- [mock] Simulated code analysis
-- [mock] Generated placeholder response
-
-##### Next Steps
-
-1. Review the simulated output
-2. Verify hook execution flow
-3. Check session logging
-
----
-
-*This response was generated by the mock engine for dry-run/testing.*
-EOF
-
-  echo "[ai] Mock response generated"
-}
-
-# =============================================================================
-# Engine: Codex
-# =============================================================================
-
-run_codex() {
-  if ! detect_codex; then
-    echo "[ai] ERROR: codex CLI not installed" >&2
-    exit 1
-  fi
-
-  local model_flag=""
-  [[ -n "${MODEL}" ]] && model_flag="--model ${MODEL}"
-
-  codex exec --full-auto \
-    -C "${WORKSPACE}" \
-    ${model_flag} \
-    -o "${RESPONSE_FILE}" \
-    - < "${PROMPT_FILE}"
-}
-
-# =============================================================================
-# Engine: Claude
-# =============================================================================
-
-run_claude() {
-  if ! detect_claude; then
-    echo "[ai] ERROR: claude CLI not installed" >&2
-    exit 1
-  fi
-
-  local model_flag=""
-  [[ -n "${MODEL}" ]] && model_flag="--model ${MODEL}"
-
-  claude ${model_flag} \
-    -p "$(cat "${PROMPT_FILE}")" \
-    > "${RESPONSE_FILE}"
-}
-
-# =============================================================================
-# Engine: Ollama
-# =============================================================================
-
-run_ollama() {
-  if ! detect_ollama; then
-    echo "[ai] ERROR: ollama not running" >&2
-    exit 1
-  fi
-
-  local model="${MODEL:-deepseek-coder}"
-
-  ollama run "${model}" \
-    < "${PROMPT_FILE}" \
-    > "${RESPONSE_FILE}"
-}
-
-# =============================================================================
-# Engine: OpenAI API
-# =============================================================================
-
-run_openai() {
-  if ! detect_openai; then
-    echo "[ai] ERROR: OPENAI_API_KEY not set" >&2
-    exit 1
-  fi
-
-  local model="${MODEL:-gpt-4}"
-  local prompt_content
-
-  prompt_content=$(jq -Rs . < "${PROMPT_FILE}")
-
-  curl -s https://api.openai.com/v1/chat/completions \
-    -H "Authorization: Bearer ${OPENAI_API_KEY}" \
-    -H "Content-Type: application/json" \
-    -d "{
-      \"model\": \"${model}\",
-      \"messages\": [{\"role\": \"user\", \"content\": ${prompt_content}}]
-    }" | jq -r '.choices[0].message.content' > "${RESPONSE_FILE}"
-}
-
-# =============================================================================
-# Engine: Anthropic API
-# =============================================================================
-
-run_anthropic() {
-  if ! detect_anthropic; then
-    echo "[ai] ERROR: ANTHROPIC_API_KEY not set" >&2
-    exit 1
-  fi
-
-  local model="${MODEL:-claude-sonnet-4-20250514}"
-  local prompt_content
-
-  prompt_content=$(jq -Rs . < "${PROMPT_FILE}")
-
-  curl -s https://api.anthropic.com/v1/messages \
-    -H "x-api-key: ${ANTHROPIC_API_KEY}" \
-    -H "anthropic-version: 2023-06-01" \
-    -H "Content-Type: application/json" \
-    -d "{
-      \"model\": \"${model}\",
-      \"max_tokens\": 4096,
-      \"messages\": [{\"role\": \"user\", \"content\": ${prompt_content}}]
-    }" | jq -r '.content[0].text' > "${RESPONSE_FILE}"
+  rm -f "${tasks_json}"
+  return 1
 }
 
 # =============================================================================
@@ -369,24 +172,20 @@ validate_inputs() {
   fi
 }
 
-# Validates known incompatible model/engine combinations in adapter layer.
+# Validates model/engine compatibility using model_pattern from tasks.jsonc
 validate_engine_model_compatibility() {
-  local selected_engine selected_model
-  selected_engine="$(printf '%s' "${ENGINE}" | tr '[:upper:]' '[:lower:]')"
-  selected_model="$(printf '%s' "${MODEL}" | tr '[:upper:]' '[:lower:]')"
+  [[ -n "${MODEL}" ]] || return 0
 
-  [[ -n "${selected_model}" ]] || return 0
+  local pattern
+  pattern="$(get_engine_prop "${ENGINE}" "model_pattern")"
+  [[ -n "${pattern}" ]] || return 0
 
-  if [[ "${selected_engine}" == "codex" ]] && [[ "${selected_model}" =~ ^claude([:-]|$) ]]; then
-    echo "[ai] ERROR: invalid model/engine combination: engine=codex model=${MODEL}" >&2
-    echo "[ai] Use engine=claude with Claude models, or choose a Codex-compatible model." >&2
-    exit 1
-  fi
+  local model_lower
+  model_lower="$(printf '%s' "${MODEL}" | tr '[:upper:]' '[:lower:]')"
 
-  if [[ "${selected_engine}" == "claude" ]] && [[ "${selected_model}" =~ (^gpt[-:]|codex) ]]; then
-    echo "[ai] ERROR: invalid model/engine combination: engine=claude model=${MODEL}" >&2
-    echo "[ai] Use a Claude model (e.g. claude-sonnet-*) or omit model for Claude default." >&2
-    exit 1
+  if ! [[ "${model_lower}" =~ ${pattern} ]]; then
+    echo "[ai] WARNING: model '${MODEL}' may not be compatible with engine '${ENGINE}'" >&2
+    echo "[ai] Expected pattern: ${pattern}" >&2
   fi
 }
 
@@ -421,13 +220,20 @@ main() {
 
   # Auto-detect engine if not specified
   if [[ -z "${ENGINE}" ]]; then
-    ENGINE=$(auto_detect_engine)
+    ENGINE="$(auto_detect_engine || true)"
     if [[ -z "${ENGINE}" ]]; then
       echo "[ai] ERROR: No AI engine available" >&2
       echo "[ai] Run with RALPH_ENGINE=list to see options" >&2
       exit 1
     fi
     echo "[ai] Auto-detected: ${ENGINE}"
+  fi
+
+  # Verify engine exists
+  if [[ -z "$(get_engine_prop "${ENGINE}" "run")" ]]; then
+    echo "[ai] ERROR: Unknown engine: ${ENGINE}" >&2
+    echo "[ai] Run with RALPH_ENGINE=list to see available engines" >&2
+    exit 1
   fi
 
   validate_inputs
@@ -437,20 +243,11 @@ main() {
   [[ -n "${MODEL}" ]] && echo "[ai] Model: ${MODEL}"
   echo "[ai] Prompt: ${PROMPT_FILE}"
 
-  # Dispatch to engine
-  case "${ENGINE}" in
-    mock)      run_mock      ;;
-    codex)     run_codex     ;;
-    claude)    run_claude    ;;
-    ollama)    run_ollama    ;;
-    openai)    run_openai    ;;
-    anthropic) run_anthropic ;;
-    *)
-      echo "[ai] ERROR: Unknown engine: ${ENGINE}" >&2
-      echo "[ai] Run with RALPH_ENGINE=list to see available engines" >&2
-      exit 1
-      ;;
-  esac
+  # Run the engine
+  if ! run_engine "${ENGINE}"; then
+    echo "[ai] ERROR: Engine '${ENGINE}' failed" >&2
+    exit 1
+  fi
 
   # Verify output
   verify_response

@@ -34,7 +34,7 @@ JSONC
 # shellcheck disable=SC1091
 source "${ROOT_DIR}/.ralph/lib/json.sh"
 # shellcheck disable=SC1091
-source "${ROOT_DIR}/.ralph/lib/core/hooks-parser.sh"
+source "${ROOT_DIR}/.ralph/lib/core/parser.sh"
 
 # Stub functions
 state_record_choice() { :; }
