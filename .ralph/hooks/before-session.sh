@@ -312,12 +312,20 @@ resolve_approver_identity() {
   printf '%s\n' "${identity}"
 }
 
+## Returns success when plan file is JSON with a .steps array.
+plan_has_structured_steps() {
+  local plan_file="$1"
+  command -v jq >/dev/null 2>&1 || return 1
+  jq -e '.steps | type == "array"' "${plan_file}" >/dev/null 2>&1
+}
+
 ## Writes plan approval metadata to plan.json.
 write_plan_approval_metadata() {
   local source="$1"
   local plan_file approver approved_at tmp
   plan_file="${RALPH_PLAN_FILE:-${RALPH_WORKSPACE}/.ralph/plans/plan.json}"
   [[ -f "${plan_file}" ]] || return 0
+  plan_has_structured_steps "${plan_file}" || return 0
 
   if ! command -v jq >/dev/null 2>&1; then
     ralph_log "WARN" "before-session" "jq not found; skipping plan approval metadata write"
@@ -358,7 +366,7 @@ render_plan_preview_box() {
   local step_limit="${RALPH_STEPS:-0}"
   local pending_seen=0
 
-  if command -v jq >/dev/null 2>&1; then
+  if plan_has_structured_steps "${plan_file}"; then
     total_steps="$(jq '[.steps[]] | length' "${plan_file}" 2>/dev/null || echo "?")"
     completed_steps="$(jq '[.steps[] | select(.status == "completed")] | length' "${plan_file}" 2>/dev/null || echo "?")"
     pending_steps="$(jq '[.steps[] | select(.status == "pending")] | length' "${plan_file}" 2>/dev/null || echo "?")"
@@ -386,7 +394,7 @@ render_plan_preview_box() {
     echo "${border}"
   fi
 
-  if command -v jq >/dev/null 2>&1; then
+  if plan_has_structured_steps "${plan_file}"; then
     local step_index=0
     while IFS=$'\t' read -r status id description; do
       ((step_index++)) || true
@@ -431,9 +439,12 @@ render_plan_preview_box() {
       fi
     done < <(jq -r '.steps[] | [.status, .id, .description] | @tsv' "${plan_file}" 2>/dev/null || true)
   else
-    while IFS= read -r line; do
-      echo "| ${line}"
-    done < "${plan_file}"
+    local rel_plan="${plan_file}"
+    if command -v realpath >/dev/null 2>&1; then
+      rel_plan="$(realpath --relative-to="${RALPH_WORKSPACE}" "${plan_file}" 2>/dev/null || printf '%s' "${plan_file}")"
+    fi
+    echo "| Plan format does not support inline preview."
+    echo "| Open file: ${rel_plan}"
   fi
 
   if command -v ui_box_border >/dev/null 2>&1; then
@@ -531,13 +542,15 @@ run_plan_approval_gate() {
   [[ "${RALPH_HUMAN_GUARD:-0}" == "1" ]] || return 0
   [[ "${scope}" == "both" || "${scope}" == "session" ]] || return 0
 
-  pending_steps="$(jq '[.steps[] | select(.status == "pending")] | length' "${plan_file}" 2>/dev/null || echo "")"
-  if [[ "${pending_steps}" == "0" ]]; then
-    ralph_log "INFO" "before-session" "Plan has no pending steps; skipping plan approval"
-    PLAN_SESSION_APPROVED=1
-    ralph_event "plan_guard" "skipped" "plan already completed"
-    command -v ralph_state_choice >/dev/null 2>&1 && ralph_state_choice "before-session" "plan-approval-skipped" "plan already completed"
-    return 0
+  if plan_has_structured_steps "${plan_file}"; then
+    pending_steps="$(jq '[.steps[] | select(.status == "pending")] | length' "${plan_file}" 2>/dev/null || echo "")"
+    if [[ "${pending_steps}" == "0" ]]; then
+      ralph_log "INFO" "before-session" "Plan has no pending steps; skipping plan approval"
+      PLAN_SESSION_APPROVED=1
+      ralph_event "plan_guard" "skipped" "plan already completed"
+      command -v ralph_state_choice >/dev/null 2>&1 && ralph_state_choice "before-session" "plan-approval-skipped" "plan already completed"
+      return 0
+    fi
   fi
 
   if [[ "${RALPH_HUMAN_GUARD_ASSUME_YES:-0}" == "1" ]]; then

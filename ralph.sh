@@ -29,7 +29,9 @@ init_runtime_defaults() {
   GOAL=""
   PLAN_FILE="plan.json"
   PLAN_FILE_PATH=""
+  PLAN_CONTEXT_FILE=""
   PLAN_CLI_SET=0
+  RESET_PLAN=0
   NEW_PLAN=0
   GUIDE_PATH=""
   GUIDE_CONTENT=""
@@ -441,6 +443,7 @@ run_hook() {
   export RALPH_RESPONSE_FILE="${last_response:-}"
   export RALPH_PLAN_FILE="$(plan_json_path)"
   export RALPH_GUIDE_FILE="${GUIDE_PATH:-}"
+  export RALPH_PLAN_CONTEXT_FILE="${PLAN_CONTEXT_FILE:-}"
   export RALPH_ENGINE="${ACTIVE_ENGINE:-${RALPH_ENGINE:-codex}}"
   export RALPH_MODEL="${ACTIVE_MODEL:-${MODEL:-}}"
   export RALPH_GOAL="${GOAL}"
@@ -570,15 +573,17 @@ run_repo_tests() {
 usage() {
   cat <<EOF
 Usage:
-  ./ralph.sh --goal "<goal>" [options]
+  ./ralph.sh [--goal "<goal>" | --plan <file>] [options]
 
 Required:
-      --goal "<text>"     The overall goal for this session
+      --goal "<text>"     The overall goal for this session (optional when --plan is set)
+  or  --plan <file>       Execution plan file with steps/goal metadata
 
 Options:
       --steps <N>         Max steps to run (default: all pending, or profile default)
       --plan <file>       Execution plan file (default: plan.json -> .ralph/plans/plan.json)
       --new-plan          Create/select a new plan interactively, regardless of existing plan state
+      --reset-plan        Reset selected structured plan (all steps -> pending) before session start
       --guide <file>      Optional guidance file (e.g., AGENTS.md)
       --workspace <path>  Workspace directory (default: current dir)
       --model <name>      Model name (default: engine default)
@@ -630,6 +635,7 @@ parse_args() {
       --goal) GOAL="${2:-}"; shift 2 ;;
       --plan) PLAN_FILE="${2:-}"; PLAN_CLI_SET=1; shift 2 ;;
       --new-plan) NEW_PLAN=1; shift ;;
+      --reset-plan) RESET_PLAN=1; shift ;;
       --guide) GUIDE_PATH="${2:-}"; shift 2 ;;
       --workspace) WORKSPACE="${2:-}"; shift 2 ;;
       --model) MODEL="${2:-}"; MODEL_CLI_SET=1; shift 2 ;;
@@ -671,6 +677,22 @@ parse_args() {
     run_repo_tests
     exit 0
   fi
+}
+
+plan_file_has_structured_steps() {
+  local plan_file="$1"
+  [[ -f "${plan_file}" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+  jq -e '.steps | type == "array"' "${plan_file}" >/dev/null 2>&1
+}
+
+derive_structured_plan_path_from_context() {
+  local context_file="$1"
+  local base_name
+  base_name="$(basename "${context_file}")"
+  base_name="${base_name%.*}"
+  [[ -z "${base_name}" ]] && base_name="context-plan"
+  printf '%s/.ralph/plans/%s.plan.json' "${ROOT}" "${base_name}"
 }
 
 validate_args() {
@@ -854,9 +876,9 @@ validate_args() {
     exit 1
   fi
 
-  # Goal is required
-  if [[ -z "${GOAL}" ]]; then
-    echo "--goal is required" >&2
+  # Goal is required unless an explicit plan was provided.
+  if [[ -z "${GOAL}" && "${PLAN_CLI_SET}" -ne 1 ]]; then
+    echo "--goal is required unless --plan is provided" >&2
     exit 1
   fi
 
@@ -930,6 +952,12 @@ validate_args() {
       fi
     fi
   fi
+  if [[ -f "${PLAN_FILE_PATH}" ]] && ! plan_file_has_structured_steps "${PLAN_FILE_PATH}"; then
+    PLAN_CONTEXT_FILE="${PLAN_FILE_PATH}"
+    PLAN_FILE_PATH="$(derive_structured_plan_path_from_context "${PLAN_CONTEXT_FILE}")"
+    echo "[session] Non-structured --plan used as planning context: $(to_rel_path "${PLAN_CONTEXT_FILE}")"
+    echo "[session] Structured plan output will be: $(to_rel_path "${PLAN_FILE_PATH}")"
+  fi
   mkdir -p "$(dirname "${PLAN_FILE_PATH}")"
   STATE_FILE_PATH="$(state_file_path)"
   state_set_last_plan "${PLAN_FILE_PATH}"
@@ -960,6 +988,30 @@ validate_args() {
   fi
 
   [[ -z "${TIMEOUT_SECONDS}" ]] && TIMEOUT_SECONDS=0 || true
+}
+
+reset_selected_plan_if_requested() {
+  [[ "${RESET_PLAN}" -eq 1 ]] || return 0
+
+  local plan_file backup_path
+  plan_file="$(plan_json_path)"
+  if [[ ! -f "${plan_file}" ]]; then
+    echo "[session] --reset-plan: plan file not found, skipping: $(to_rel_path "${plan_file}")"
+    return 0
+  fi
+
+  if ! command -v reset_plan_steps_to_pending >/dev/null 2>&1; then
+    echo "[session] --reset-plan: helper missing (reset_plan_steps_to_pending), skipping"
+    return 0
+  fi
+
+  if backup_path="$(reset_plan_steps_to_pending)"; then
+    echo "[session] --reset-plan: all steps reset to pending"
+    [[ -n "${backup_path}" ]] && echo "[session] --reset-plan: backup saved: $(to_rel_path "${backup_path}")"
+  else
+    echo "[session] --reset-plan: failed to reset plan" >&2
+    exit 1
+  fi
 }
 
 # =============================================================================
@@ -1011,6 +1063,41 @@ run_ai_engine() {
   fi
 }
 
+# Runs an AI command while emitting periodic terminal progress in interactive mode.
+run_ai_command_with_indicator() {
+  local engine_log="$1"
+  shift
+
+  local rc=0
+  if [[ -t 1 ]] && [[ "${DRY_RUN}" -ne 1 ]]; then
+    set +e
+    (
+      "$@"
+    ) >> "${engine_log}" 2>&1 &
+    local pid=$!
+    local elapsed=0
+    while kill -0 "${pid}" 2>/dev/null; do
+      sleep 2
+      elapsed=$((elapsed + 2))
+      if (( elapsed % 10 == 0 )); then
+        echo "${C_DIM}[ai] working... ${elapsed}s${C_RESET}"
+      fi
+    done
+    wait "${pid}"
+    rc=$?
+    set -e
+    return "${rc}"
+  fi
+
+  set +e
+  (
+    "$@"
+  ) >> "${engine_log}" 2>&1
+  rc=$?
+  set -e
+  return "${rc}"
+}
+
 # Run AI via hook
 run_ai_hook() {
   local hook_path="$1"
@@ -1037,15 +1124,16 @@ run_ai_hook() {
 
   # ai.sh handles dry-run internally (uses mock engine)
   if [[ "${TIMEOUT_SECONDS}" -gt 0 ]] && [[ "${DRY_RUN}" -ne 1 ]]; then
-    set +e
-    timeout "${TIMEOUT_SECONDS}" env RALPH_HOOK_DEPTH="$((hook_depth + 1))" "${hook_path}" >> "${engine_log}" 2>&1
-    local rc=$?
-    set -e
+    local rc=0
+    run_ai_command_with_indicator "${engine_log}" \
+      timeout "${TIMEOUT_SECONDS}" \
+      env RALPH_HOOK_DEPTH="$((hook_depth + 1))" "${hook_path}" || rc=$?
     [[ "${rc}" -eq 124 ]] && echo "ai hook timed out after ${TIMEOUT_SECONDS}s" >&2
     return "${rc}"
   fi
 
-  env RALPH_HOOK_DEPTH="$((hook_depth + 1))" "${hook_path}" >> "${engine_log}" 2>&1
+  run_ai_command_with_indicator "${engine_log}" \
+    env RALPH_HOOK_DEPTH="$((hook_depth + 1))" "${hook_path}"
 }
 
 # Built-in codex execution (fallback when no ai hook)
@@ -1425,6 +1513,7 @@ main() {
   check_docker_delegation "$@"
   parse_args "$@"
   validate_args
+  reset_selected_plan_if_requested
   setup_colors
   print_verbose_runtime_config
   setup_session

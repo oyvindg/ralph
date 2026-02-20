@@ -197,7 +197,7 @@ main() {
     if ! call_hook "human-gate"; then
       ralph_log "WARN" "quality-gate" "Step rejected by human gate"
       ralph_event "quality_gate" "rejected" "human gate rejected step"
-      exit 3
+      exit 1
     fi
   else
     ralph_log "INFO" "quality-gate" "Human guard skipped at step stage (scope=${scope})"

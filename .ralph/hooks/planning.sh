@@ -19,6 +19,7 @@ set -euo pipefail
 # =============================================================================
 
 PLAN_FILE="${RALPH_PLAN_FILE:-${RALPH_WORKSPACE}/.ralph/plans/plan.json}"
+PLAN_CONTEXT_FILE="${RALPH_PLAN_CONTEXT_FILE:-}"
 HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLAN_FORCE_REGENERATE="${RALPH_PLAN_FORCE_REGENERATE:-0}"
 PLAN_FEEDBACK="${RALPH_PLAN_FEEDBACK:-}"
@@ -46,6 +47,12 @@ now_iso() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
 }
 
+has_structured_steps() {
+  local file="$1"
+  command -v jq >/dev/null 2>&1 || return 1
+  jq -e '.steps | type == "array"' "${file}" >/dev/null 2>&1
+}
+
 # =============================================================================
 # Check Existing Plan
 # =============================================================================
@@ -57,8 +64,12 @@ check_existing_plan() {
   fi
 
   if [[ -f "${PLAN_FILE}" ]]; then
-    p_log "Plan exists: ${PLAN_FILE}"
-    return 0
+    if has_structured_steps "${PLAN_FILE}"; then
+      p_log "Plan exists: ${PLAN_FILE}"
+      return 0
+    fi
+    p_log "Plan file exists but is not structured (.steps missing), regenerating: ${PLAN_FILE}"
+    return 1
   fi
   return 1
 }
@@ -104,6 +115,17 @@ PROMPT
 Project workspace: ${RALPH_WORKSPACE}
 User objective: $(cat "${RALPH_PROMPT_FILE}" 2>/dev/null || echo "No prompt specified")
 EOF
+
+  if [[ -n "${PLAN_CONTEXT_FILE}" && -f "${PLAN_CONTEXT_FILE}" ]]; then
+    cat >> "${prompt_file}" <<EOF
+
+Additional plan context file: ${PLAN_CONTEXT_FILE}
+Use this as context only, and output a fresh structured JSON plan.
+
+Context content:
+EOF
+    sed -n '1,240p' "${PLAN_CONTEXT_FILE}" >> "${prompt_file}" || true
+  fi
 
   if [[ -n "${PLAN_FEEDBACK}" ]]; then
     cat >> "${prompt_file}" <<EOF

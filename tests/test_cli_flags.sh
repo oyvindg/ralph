@@ -36,6 +36,7 @@ run_ok "${RALPH}" --goal "smoke" --help
 run_ok "${RALPH}" --steps 1 --help
 run_ok "${RALPH}" --plan "plan.json" --help
 run_ok "${RALPH}" --new-plan --help
+run_ok "${RALPH}" --reset-plan --help
 run_ok "${RALPH}" --guide "AGENTS.md" --help
 run_ok "${RALPH}" --workspace "${TMP_WS}" --help
 run_ok "${RALPH}" --model "gpt-5" --help

@@ -73,22 +73,45 @@ run_configured_select() {
   command -v jq >/dev/null 2>&1 || return 2
   command -v json_like_to_temp_file >/dev/null 2>&1 || return 2
 
-  local normalized_hooks
-  normalized_hooks="$(json_like_to_temp_file "${HOOKS_JSON_PATH}")" || return 2
+  has_human_gate_select() {
+    local hooks_file="$1"
+    local normalized_hooks merged_hooks
+    normalized_hooks="$(json_like_to_temp_file "${hooks_file}")" || return 1
+    merged_hooks=""
 
-  if ! jq -e '
-    .["human-gate-confirm"]?.system as $node
-    | if $node == null then false
-      elif ($node|type) == "array" then ($node|length) > 0
-      elif ($node|type) == "object" then (($node.commands // [])|length) > 0
-      else false end
-  ' "${normalized_hooks}" >/dev/null 2>&1; then
+    # When hooks.jsonc uses include(s), validate against merged view
+    # so we do not incorrectly reject as missing-config.
+    if command -v build_merged_hooks_json >/dev/null 2>&1; then
+      merged_hooks="$(mktemp)"
+      if build_merged_hooks_json "${hooks_file}" "${merged_hooks}" >/dev/null 2>&1; then
+        rm -f "${normalized_hooks}"
+        normalized_hooks="${merged_hooks}"
+      else
+        rm -f "${merged_hooks}" 2>/dev/null || true
+      fi
+    fi
+
+    if jq -e '
+      .["human-gate-confirm"]?.system as $node
+      | if $node == null then false
+        elif ($node|type) == "array" then ($node|length) > 0
+        elif ($node|type) == "object" then (($node.commands // [])|length) > 0
+        else false end
+    ' "${normalized_hooks}" >/dev/null 2>&1; then
+      rm -f "${normalized_hooks}"
+      return 0
+    fi
     rm -f "${normalized_hooks}"
+    return 1
+  }
+
+  local active_hooks_path="${HOOKS_JSON_PATH}"
+  if ! has_human_gate_select "${active_hooks_path}"; then
     return 2
   fi
-  rm -f "${normalized_hooks}"
 
   export RALPH_HUMAN_GUARD_STAGE="${STAGE}"
+  HOOKS_JSON_PATH="${active_hooks_path}"
   run_json_hook_commands "human-gate-confirm" "system" "${RALPH_STEP:-}" "${RALPH_STEP_EXIT_CODE:-}"
 }
 

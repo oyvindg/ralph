@@ -37,7 +37,7 @@ get_current_step() {
   local plan_file
   plan_file="$(plan_json_path)"
   [[ -f "${plan_file}" ]] || return
-  jq -r '.steps[] | select(.status == "pending") | @json' "${plan_file}" 2>/dev/null | head -n1
+  jq -r 'first(.steps[] | select(.status == "pending")) | if . == null then empty else @json end' "${plan_file}" 2>/dev/null || true
 }
 
 # Returns id of current pending step.
@@ -106,4 +106,36 @@ get_plan_max_steps() {
   plan_file="$(plan_json_path)"
   [[ -f "${plan_file}" ]] || { echo "0"; return; }
   jq -r 'if (.max_steps // 0) | type == "number" then (.max_steps // 0) else 0 end' "${plan_file}" 2>/dev/null || echo "0"
+}
+
+# Resets all structured plan steps to pending.
+# Writes a timestamped backup and prints its path on success.
+reset_plan_steps_to_pending() {
+  local plan_file now backup tmp_file
+  plan_file="$(plan_json_path)"
+  [[ -f "${plan_file}" ]] || return 1
+  command -v jq >/dev/null 2>&1 || return 1
+
+  if ! jq -e '.steps | type == "array"' "${plan_file}" >/dev/null 2>&1; then
+    # Non-structured plans are context files; nothing to reset.
+    return 0
+  fi
+
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  backup="${plan_file}.bak.$(date +%Y%m%d_%H%M%S)"
+  cp "${plan_file}" "${backup}"
+  tmp_file="${plan_file}.tmp"
+
+  jq --arg now "${now}" '
+    .updated_at = $now
+    | .steps = [
+        .steps[]
+        | .status = "pending"
+        | .commit = null
+        | .completed_at = null
+        | .updated_at = $now
+      ]
+  ' "${plan_file}" > "${tmp_file}"
+  mv "${tmp_file}" "${plan_file}"
+  printf '%s\n' "${backup}"
 }

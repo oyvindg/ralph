@@ -7,3 +7,5 @@ sessions/
 
 # work in progress
 dev/
+
+tests/tmp/
