@@ -68,7 +68,7 @@
             }
           ]
         },
-        "when": "{tasks.conditions.workspace-empty} && {tasks.conditions.workflow-not-set}",
+        "when": "task:conditions.workspace-empty && task:conditions.workflow-not-set",
         "run_in_dry_run": false
       }
     ],

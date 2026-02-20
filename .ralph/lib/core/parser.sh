@@ -53,9 +53,9 @@ json_hook_localize() {
   local lookup_key="${key}"
   local fallback_text="${fallback}"
 
-  # Support grouped key syntax: {my.grouped.label}
-  if [[ "${lookup_key}" =~ ^\{(.+)\}$ ]]; then
-    lookup_key="${BASH_REMATCH[1]}"
+  # Support explicit lang: prefix syntax: "lang:my.key"
+  if [[ "${lookup_key}" == lang:* ]]; then
+    lookup_key="${lookup_key#lang:}"
     [[ -z "${fallback_text}" || "${fallback_text}" == "${key}" ]] && fallback_text="${lookup_key}"
   fi
 
@@ -183,11 +183,9 @@ run_json_hook_command_entry() {
     return 0
   fi
 
-  # Expand task references in run expression:
-  # - Full reference: "task:my.task" or "{{my.task}}"
-  # - Inline chaining: "task:a && task:b && ./script.sh"
-  # - Mixed: "{{cleanup}} && task:deploy.staging"
-  if [[ "${cmd}" == *task:* || "${cmd}" == *"{{"* ]]; then
+  # Expand task references in run expression.
+  # Supports full references and inline chaining with task: prefix.
+  if [[ "${cmd}" == *task:* ]]; then
     local expanded_cmd
     expanded_cmd="$(json_hook_expand_run_placeholders "${cmd}" "${tasks_file}")"
     if [[ -z "${expanded_cmd}" ]]; then
@@ -278,7 +276,7 @@ json_hook_when_task_command() {
   cmd="$(printf '%s' "${payload}" | jq -r '.run // .cmd // empty' 2>/dev/null || true)"
   if [[ -n "${cmd}" && -n "${tasks_file}" ]]; then
     # Only attempt expansion if there are task references
-    if [[ "${cmd}" == *"{{"* || "${cmd}" == *"task:"* ]]; then
+    if [[ "${cmd}" == *"task:"* ]]; then
       local expanded
       expanded="$(json_hook_expand_run_placeholders "${cmd}" "${tasks_file}")"
       if [[ -n "${expanded}" ]]; then
@@ -291,19 +289,18 @@ json_hook_when_task_command() {
   printf '%s' "${cmd}"
 }
 
-# Expands {{task.ref}} placeholders in when-expression to runnable shell clauses.
-# Example:
-#   "{{conditions.a}} && {{conditions.b}}" -> "( <cmd-a> ) && ( <cmd-b> )"
+# Expands task: references in when-expression to runnable shell clauses.
 json_hook_expand_when_placeholders() {
   local expr="$1"
   local tasks_file="$2"
   local out="${expr}"
   local guard=0
 
-  while [[ "${out}" =~ \{\{([a-zA-Z0-9._-]+)\}\} ]]; do
+  # Expand command substitution task refs: $(task:ref) -> $( <cmd> )
+  while [[ "${out}" =~ \$\([[:space:]]*task:([a-zA-Z0-9._-]+)[[:space:]]*\) ]]; do
     ((guard++)) || true
     if [[ "${guard}" -gt 64 ]]; then
-      echo "${C_YELLOW}[hooks.json]${C_RESET} when placeholder expansion limit reached" >&2
+      echo "${C_YELLOW}[hooks.json]${C_RESET} when command-substitution expansion limit reached" >&2
       return 1
     fi
 
@@ -316,7 +313,35 @@ json_hook_expand_when_placeholders() {
       return 1
     fi
 
-    out="${out/${token}/( ${cmd} )}"
+    local replacement="\$( ${cmd} )"
+    replacement="${replacement//\\/\\\\}"
+    replacement="${replacement//&/\\&}"
+    out="${out/${token}/${replacement}}"
+  done
+
+  # Expand inline task:ref patterns, also when mixed with shell operators.
+  guard=0
+  while [[ "${out}" =~ (^|[[:space:]]|[;&|()])task:([a-zA-Z0-9._-]+) ]]; do
+    ((guard++)) || true
+    if [[ "${guard}" -gt 64 ]]; then
+      echo "${C_YELLOW}[hooks.json]${C_RESET} when task: expansion limit reached" >&2
+      return 1
+    fi
+
+    local prefix="${BASH_REMATCH[1]}"
+    local ref="${BASH_REMATCH[2]}"
+    local pattern="${prefix}task:${ref}"
+    local cmd
+    cmd="$(json_hook_when_task_command "${ref}" "${tasks_file}")"
+    if [[ -z "${cmd}" ]]; then
+      echo "${C_YELLOW}[hooks.json]${C_RESET} when task not found: ${ref}" >&2
+      return 1
+    fi
+
+    local replacement="${prefix}( ${cmd} )"
+    replacement="${replacement//\\/\\\\}"
+    replacement="${replacement//&/\\&}"
+    out="${out/${pattern}/${replacement}}"
   done
 
   printf '%s\n' "${out}"
@@ -324,22 +349,20 @@ json_hook_expand_when_placeholders() {
 
 # Expands task references in run-expression to actual shell commands.
 # Supports:
-#   - {{my.task}} double-brace placeholder syntax
 #   - task:my.task prefix syntax (standalone or inline)
 # Example:
 #   "task:utils.cleanup && ./deploy.sh" -> "( rm -rf tmp ) && ./deploy.sh"
-#   "{{a}} && {{b}}" -> "( cmd-a ) && ( cmd-b )"
 json_hook_expand_run_placeholders() {
   local expr="$1"
   local tasks_file="$2"
   local out="${expr}"
   local guard=0
 
-  # Expand {{task.ref}} placeholders (double-brace syntax)
-  while [[ "${out}" =~ \{\{([a-zA-Z0-9._-]+)\}\} ]]; do
+  # Expand command substitution task refs: $(task:ref) -> $( <cmd> )
+  while [[ "${out}" =~ \$\([[:space:]]*task:([a-zA-Z0-9._-]+)[[:space:]]*\) ]]; do
     ((guard++)) || true
     if [[ "${guard}" -gt 64 ]]; then
-      echo "${C_YELLOW}[hooks.json]${C_RESET} run placeholder expansion limit reached" >&2
+      echo "${C_YELLOW}[hooks.json]${C_RESET} run command-substitution expansion limit reached" >&2
       return 1
     fi
 
@@ -348,17 +371,20 @@ json_hook_expand_run_placeholders() {
     local cmd
     cmd="$(json_hook_when_task_command "${ref}" "${tasks_file}")"
     if [[ -z "${cmd}" ]]; then
-      echo "${C_YELLOW}[hooks.json]${C_RESET} run {{task}} not found: ${ref} (file=${tasks_file:-EMPTY})" >&2
+      echo "${C_YELLOW}[hooks.json]${C_RESET} run task not found: ${ref} (file=${tasks_file:-EMPTY})" >&2
       return 1
     fi
 
-    out="${out/${token}/( ${cmd} )}"
+    local replacement="\$( ${cmd} )"
+    replacement="${replacement//\\/\\\\}"
+    replacement="${replacement//&/\\&}"
+    out="${out/${token}/${replacement}}"
   done
 
   # Expand task:ref patterns (word boundary aware)
   # Matches: task:name.path at start, after space, or after shell operators
   guard=0
-  while [[ "${out}" =~ (^|[[:space:]]|[^a-zA-Z0-9._-])task:([a-zA-Z0-9._-]+) ]]; do
+  while [[ "${out}" =~ (^|[[:space:]]|[;&|()])task:([a-zA-Z0-9._-]+) ]]; do
     ((guard++)) || true
     if [[ "${guard}" -gt 64 ]]; then
       echo "${C_YELLOW}[hooks.json]${C_RESET} run task: expansion limit reached" >&2
@@ -375,7 +401,10 @@ json_hook_expand_run_placeholders() {
       return 1
     fi
 
-    out="${out/${pattern}/${prefix}( ${cmd} )}"
+    local replacement="${prefix}( ${cmd} )"
+    replacement="${replacement//\\/\\\\}"
+    replacement="${replacement//&/\\&}"
+    out="${out/${pattern}/${replacement}}"
   done
 
   printf '%s\n' "${out}"
@@ -431,9 +460,10 @@ json_hook_when_matches() {
       cmd="$(json_hook_when_task_command "${task_ref}" "${tasks_file}")"
     else
       cmd="$(printf '%s' "${raw}" | jq -r '.run // .cmd // empty' 2>/dev/null || true)"
+      if [[ -n "${cmd}" ]]; then
+        cmd="$(json_hook_expand_when_placeholders "${cmd}" "${tasks_file}" || true)"
+      fi
     fi
-  elif [[ "${raw}" == task:* ]]; then
-    cmd="$(json_hook_when_task_command "${raw#task:}" "${tasks_file}")"
   else
     cmd="$(json_hook_expand_when_placeholders "${raw}" "${tasks_file}" || true)"
     [[ -z "${cmd}" ]] && cmd="${raw}"
@@ -832,21 +862,12 @@ expand_json_hook_task() {
 # Normalizes task reference formats to dotted task key.
 # Supported input examples:
 # - "task:wizard.workflow-coding"
-# - "{{wizard.workflow-coding}}"
 # - "wizard.workflow-coding"
 json_hook_normalize_task_ref() {
   local ref="${1:-}"
   [[ -z "${ref}" ]] && return 0
 
   ref="${ref#task:}"
-  # Strip double braces {{...}}
-  if [[ "${ref}" =~ ^\{\{(.+)\}\}$ ]]; then
-    ref="${BASH_REMATCH[1]}"
-  fi
-  # Strip single braces {...} (legacy)
-  if [[ "${ref}" =~ ^\{(.+)\}$ ]]; then
-    ref="${BASH_REMATCH[1]}"
-  fi
   ref="${ref#tasks.}"
   printf '%s\n' "${ref}"
 }

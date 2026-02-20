@@ -47,39 +47,33 @@ build_merged_tasks_json "${TMP_DIR}/.ralph/tasks.jsonc" "${TASKS_FILE}"
 result="$(json_hook_expand_run_placeholders "task:utils.step1" "${TASKS_FILE}")"
 assert_contains "${result}" "echo STEP1" "Full task:ref should expand"
 
-# Test 2: Placeholder syntax
-result="$(json_hook_expand_run_placeholders "{tasks.utils.step1}" "${TASKS_FILE}")"
-assert_contains "${result}" "echo STEP1" "Placeholder {tasks.ref} should expand"
-
-# Test 3: Inline chaining with task: prefix
+# Test 2: Inline chaining with task: prefix
 result="$(json_hook_expand_run_placeholders "task:utils.step1 && task:utils.step2" "${TASKS_FILE}")"
 assert_contains "${result}" "STEP1" "First task in chain should expand"
 assert_contains "${result}" "STEP2" "Second task in chain should expand"
 assert_contains "${result}" "&&" "Chain operator should be preserved"
 
-# Test 4: Mixed inline chaining
+# Test 3: Mixed inline chaining
 result="$(json_hook_expand_run_placeholders "task:utils.step1 && echo MIDDLE && task:utils.step2" "${TASKS_FILE}")"
 assert_contains "${result}" "STEP1" "First task should expand"
 assert_contains "${result}" "MIDDLE" "Shell command should be preserved"
 assert_contains "${result}" "STEP2" "Second task should expand"
 
-# Test 5: Placeholder chaining
-result="$(json_hook_expand_run_placeholders "{tasks.utils.step1} && {tasks.utils.step2}" "${TASKS_FILE}")"
-assert_contains "${result}" "STEP1" "First placeholder should expand"
-assert_contains "${result}" "STEP2" "Second placeholder should expand"
-
-# Test 6: Condition reference
-result="$(json_hook_expand_run_placeholders "{conditions.always-true} && echo DONE" "${TASKS_FILE}")"
-assert_contains "${result}" "true" "Condition should expand"
-assert_contains "${result}" "DONE" "Following command should be preserved"
-
-# Test 7: task: after pipe
+# Test 4: task: after pipe
 result="$(json_hook_expand_run_placeholders "echo START | task:utils.step1" "${TASKS_FILE}")"
 assert_contains "${result}" "START" "Pipe source should be preserved"
 assert_contains "${result}" "STEP1" "Task after pipe should expand"
 
-# Test 8: task: after semicolon
+# Test 5: task: after semicolon
 result="$(json_hook_expand_run_placeholders "echo A; task:utils.step1" "${TASKS_FILE}")"
 assert_contains "${result}" "STEP1" "Task after semicolon should expand"
+
+# Test 6: legacy placeholder syntax should not expand
+result="$(json_hook_expand_run_placeholders "{tasks.utils.step1}" "${TASKS_FILE}")"
+assert_contains "${result}" "{tasks.utils.step1}" "Legacy placeholder must remain untouched"
+
+# Test 7: task: inside command substitution
+result="$(json_hook_expand_run_placeholders "echo \"\$(task:utils.step1)-\$(task:utils.step2)\"" "${TASKS_FILE}")"
+assert_contains "${result}" "\$( echo STEP1 )-\$( echo STEP2 )" "task in command substitution should expand"
 
 echo "All inline task chaining tests passed"
