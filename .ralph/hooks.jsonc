@@ -1,5 +1,6 @@
 {
-  // Human gate select used by .ralph/hooks/human-gate.sh
+  // REQUIRED: Human gate select used by .ralph/hooks/human-gate.sh
+  // Do not remove without disabling human_guard in profile/CLI.
   "human-gate-confirm": {
     "system": [
       {
@@ -33,22 +34,22 @@
             {
               "code": "coding",
               "label": "{wizard.workflow.coding}",
-              "task": "workflow-coding"
+              "run": "task:workflow-coding"
             },
             {
               "code": "project-management",
               "label": "{wizard.workflow.project_management}",
-              "task": "workflow-project-management"
+              "run": "task:workflow-project-management"
             },
             {
               "code": "finance",
               "label": "{wizard.workflow.finance}",
-              "task": "workflow-finance"
+              "run": "task:workflow-finance"
             },
             {
               "code": "non-code",
               "label": "{wizard.workflow.non_code}",
-              "task": "workflow-non-code"
+              "run": "task:workflow-non-code"
             }
           ]
         },
@@ -83,7 +84,7 @@
   "after-step": {
     "after-system": [
       {
-        "task": "version-control"
+        "run": "task:version-control"
       }
     ]
   }

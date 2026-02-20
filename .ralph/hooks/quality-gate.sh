@@ -151,7 +151,15 @@ run_dry() {
 
   # Call testing hook in dry-run
   echo ""
+  local test_rc=0
+  set +e
   call_hook "testing"
+  test_rc=$?
+  set -e
+  if [[ "${test_rc}" -eq 130 || "${test_rc}" -eq 143 ]]; then
+    ralph_log "WARN" "quality-gate" "Interrupted during testing hook"
+    return 130
+  fi
 
   echo ""
   echo "[quality-gate] DRY-RUN: Simulated pass"
@@ -180,7 +188,17 @@ main() {
   enforce_guide_read_only || ((failed++)) || true
 
   # Run tests
-  call_hook "testing" || ((failed++)) || true
+  local test_rc=0
+  set +e
+  call_hook "testing"
+  test_rc=$?
+  set -e
+  if [[ "${test_rc}" -eq 130 || "${test_rc}" -eq 143 ]]; then
+    ralph_log "WARN" "quality-gate" "Interrupted during testing hook"
+    ralph_event "quality_gate" "interrupted" "testing hook interrupted"
+    exit 130
+  fi
+  [[ "${test_rc}" -ne 0 ]] && ((failed++)) || true
 
   # Result
   if [[ "${failed}" -gt 0 ]]; then

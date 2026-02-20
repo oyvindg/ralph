@@ -8,4 +8,8 @@ sessions/
 # work in progress
 dev/
 
+# artifacts
 tests/tmp/
+tests/artifacts/
+.ralph/plans/.backups/
+.ralph/baselines/

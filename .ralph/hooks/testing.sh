@@ -20,6 +20,8 @@ set -euo pipefail
 
 WORKSPACE="${RALPH_WORKSPACE:-.}"
 DRY_RUN="${RALPH_DRY_RUN:-0}"
+DRY_RUN_EXECUTE_TESTS="${RALPH_DRY_RUN_EXECUTE_TESTS:-0}"
+DRY_RUN_ACTIVE="${RALPH_TESTING_DRY_RUN_ACTIVE:-0}"
 SESSION_DIR="${RALPH_SESSION_DIR:-}"
 STEP="${RALPH_STEP:-0}"
 ASSUME_YES="${RALPH_HUMAN_GUARD_ASSUME_YES:-0}"
@@ -158,6 +160,23 @@ SUITE
   "${suite_file}" "${WORKSPACE}"
 }
 
+# Runs a command with session-specific vars removed so repository tests do not
+# pollute the current Ralph session logs/state.
+run_with_isolated_test_env() {
+  env \
+    -u RALPH_SESSION_DIR \
+    -u RALPH_SESSION_ID \
+    -u RALPH_STEP \
+    -u RALPH_STEPS \
+    -u RALPH_STEP_EXIT_CODE \
+    -u RALPH_ENGINE_LOG \
+    -u RALPH_RESPONSE_FILE \
+    -u RALPH_DRY_RUN \
+    -u RALPH_DRY_RUN_EXECUTE_TESTS \
+    -u RALPH_TESTING_DRY_RUN_ACTIVE \
+    "$@"
+}
+
 # =============================================================================
 # Test Runner Detection
 # =============================================================================
@@ -197,32 +216,32 @@ detect_cargo() {
 
 run_make_test() {
   t_log "Running: make test"
-  make -C "${WORKSPACE}" test
+  run_with_isolated_test_env make -C "${WORKSPACE}" test
 }
 
 run_repo_test_runner() {
   t_log "Running: tests/run.sh"
-  (cd "${WORKSPACE}" && ./tests/run.sh)
+  (cd "${WORKSPACE}" && run_with_isolated_test_env ./tests/run.sh)
 }
 
 run_npm_test() {
   t_log "Running: npm test"
-  npm --prefix "${WORKSPACE}" test
+  run_with_isolated_test_env npm --prefix "${WORKSPACE}" test
 }
 
 run_pytest() {
   t_log "Running: pytest"
-  (cd "${WORKSPACE}" && pytest)
+  (cd "${WORKSPACE}" && run_with_isolated_test_env pytest)
 }
 
 run_go_test() {
   t_log "Running: go test"
-  (cd "${WORKSPACE}" && go test ./...)
+  (cd "${WORKSPACE}" && run_with_isolated_test_env go test ./...)
 }
 
 run_cargo_test() {
   t_log "Running: cargo test"
-  (cd "${WORKSPACE}" && cargo test)
+  (cd "${WORKSPACE}" && run_with_isolated_test_env cargo test)
 }
 
 # =============================================================================
@@ -274,6 +293,26 @@ run_dry() {
   detect_go     && ((count++)) || true
   detect_cargo  && ((count++)) || true
 
+  if [[ "${DRY_RUN_EXECUTE_TESTS}" == "1" ]] && [[ "${DRY_RUN_ACTIVE}" != "1" ]] && detect_repo_test_runner; then
+    echo ""
+    t_log "DRY-RUN: Running tests/run.sh"
+    local dry_suite_rc=0
+    set +e
+    (cd "${WORKSPACE}" && run_with_isolated_test_env env RALPH_TESTING_DRY_RUN_ACTIVE=1 ./tests/run.sh)
+    dry_suite_rc=$?
+    set -e
+    if [[ "${dry_suite_rc}" -eq 0 ]]; then
+      t_log "DRY-RUN: tests/run.sh completed"
+    elif [[ "${dry_suite_rc}" -eq 130 || "${dry_suite_rc}" -eq 143 ]]; then
+      t_log "DRY-RUN: tests/run.sh interrupted"
+      return 130
+    else
+      t_log "DRY-RUN: tests/run.sh failed (ignored in dry-run)"
+    fi
+    t_log "DRY-RUN: Simulated pass"
+    return 0
+  fi
+
   echo ""
   if [[ "${count}" -eq 0 ]]; then
     t_log "No test runners detected"
@@ -309,36 +348,85 @@ main() {
 
   local ran=0
   local failed=0
+  local rc=0
 
   # Run all detected test suites
   if detect_repo_test_runner; then
     ((ran++)) || true
-    run_repo_test_runner || ((failed++)) || true
+    set +e
+    run_repo_test_runner
+    rc=$?
+    set -e
+    if [[ "${rc}" -eq 130 || "${rc}" -eq 143 ]]; then
+      t_log "INTERRUPTED: tests/run.sh"
+      exit 130
+    fi
+    [[ "${rc}" -ne 0 ]] && ((failed++)) || true
   fi
 
   if detect_make; then
     ((ran++)) || true
-    run_make_test || ((failed++)) || true
+    set +e
+    run_make_test
+    rc=$?
+    set -e
+    if [[ "${rc}" -eq 130 || "${rc}" -eq 143 ]]; then
+      t_log "INTERRUPTED: make test"
+      exit 130
+    fi
+    [[ "${rc}" -ne 0 ]] && ((failed++)) || true
   fi
 
   if detect_npm; then
     ((ran++)) || true
-    run_npm_test || ((failed++)) || true
+    set +e
+    run_npm_test
+    rc=$?
+    set -e
+    if [[ "${rc}" -eq 130 || "${rc}" -eq 143 ]]; then
+      t_log "INTERRUPTED: npm test"
+      exit 130
+    fi
+    [[ "${rc}" -ne 0 ]] && ((failed++)) || true
   fi
 
   if detect_pytest; then
     ((ran++)) || true
-    run_pytest || ((failed++)) || true
+    set +e
+    run_pytest
+    rc=$?
+    set -e
+    if [[ "${rc}" -eq 130 || "${rc}" -eq 143 ]]; then
+      t_log "INTERRUPTED: pytest"
+      exit 130
+    fi
+    [[ "${rc}" -ne 0 ]] && ((failed++)) || true
   fi
 
   if detect_go; then
     ((ran++)) || true
-    run_go_test || ((failed++)) || true
+    set +e
+    run_go_test
+    rc=$?
+    set -e
+    if [[ "${rc}" -eq 130 || "${rc}" -eq 143 ]]; then
+      t_log "INTERRUPTED: go test"
+      exit 130
+    fi
+    [[ "${rc}" -ne 0 ]] && ((failed++)) || true
   fi
 
   if detect_cargo; then
     ((ran++)) || true
-    run_cargo_test || ((failed++)) || true
+    set +e
+    run_cargo_test
+    rc=$?
+    set -e
+    if [[ "${rc}" -eq 130 || "${rc}" -eq 143 ]]; then
+      t_log "INTERRUPTED: cargo test"
+      exit 130
+    fi
+    [[ "${rc}" -ne 0 ]] && ((failed++)) || true
   fi
 
   # Report results

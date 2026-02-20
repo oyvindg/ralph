@@ -148,7 +148,8 @@ resolve_hooks_json_path() {
 }
 
 # Resolves optional tasks.json path from env override or workspace default.
-# Default path is `.ralph/tasks.json` with fallback to legacy `.ralph/tasks/tasks.json`.
+# Default path is `.ralph/tasks.jsonc` with fallback to `.ralph/tasks.json`,
+# then legacy `.ralph/tasks/tasks.jsonc` / `.ralph/tasks/tasks.json`.
 resolve_tasks_json_path() {
   local configured="${RALPH_TASKS_JSON:-}"
   local candidate=""
@@ -160,8 +161,12 @@ resolve_tasks_json_path() {
       candidate="${ROOT}/${configured}"
     fi
   else
-    if [[ -f "${ROOT}/.ralph/tasks.json" ]]; then
+    if [[ -f "${ROOT}/.ralph/tasks.jsonc" ]]; then
+      candidate="${ROOT}/.ralph/tasks.jsonc"
+    elif [[ -f "${ROOT}/.ralph/tasks.json" ]]; then
       candidate="${ROOT}/.ralph/tasks.json"
+    elif [[ -f "${ROOT}/.ralph/tasks/tasks.jsonc" ]]; then
+      candidate="${ROOT}/.ralph/tasks/tasks.jsonc"
     else
       candidate="${ROOT}/.ralph/tasks/tasks.json"
     fi

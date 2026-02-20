@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ensures quality-gate fails hard (no retry) when human-gate rejects a step.
+# Ensures quality-gate fails hard (no retry) when human-gate rejects due to missing config.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,11 +18,12 @@ cat > "${RESPONSE_FILE}" <<'EOF'
 Mock response content for quality-gate.
 EOF
 
-# Non-interactive shell + enabled human guard + no assume-yes => human-gate rejects.
+# Missing hooks config => human-gate rejects with missing-config error.
 set +e
 RALPH_WORKSPACE="${WORKSPACE}" \
 RALPH_SESSION_DIR="${SESSION_DIR}" \
 RALPH_RESPONSE_FILE="${RESPONSE_FILE}" \
+RALPH_HOOKS_FILE="" \
 RALPH_STEP=1 \
 RALPH_STEPS=1 \
 RALPH_DRY_RUN=0 \
@@ -34,4 +35,4 @@ RALPH_TEMP_TEST_SUITE_ON_NO_TESTS=0 \
 rc=$?
 set -e
 
-assert_eq "1" "${rc}" "quality-gate should hard-fail when human gate rejects"
+assert_eq "1" "${rc}" "quality-gate should hard-fail when human gate rejects (missing config)"

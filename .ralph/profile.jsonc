@@ -39,9 +39,9 @@
     "human_guard_assume_yes": false,
     "human_guard_scope": "both",
 
-    // Optional hooks.json/tasks.json override (relative to workspace root or absolute path)
-    // "hooks_json": ".ralph/hooks.json",
-    // "tasks_json": ".ralph/tasks.json",
+    // Explicit runtime config files (relative to workspace root or absolute path)
+    "hooks_json": ".ralph/hooks.jsonc",
+    "tasks_json": ".ralph/tasks.jsonc",
 
     // Agent routing per step (optional)
     // Object format:

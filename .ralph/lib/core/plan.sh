@@ -111,7 +111,7 @@ get_plan_max_steps() {
 # Resets all structured plan steps to pending.
 # Writes a timestamped backup and prints its path on success.
 reset_plan_steps_to_pending() {
-  local plan_file now backup tmp_file
+  local plan_file now backup tmp_file backup_dir backup_name plan_dir
   plan_file="$(plan_json_path)"
   [[ -f "${plan_file}" ]] || return 1
   command -v jq >/dev/null 2>&1 || return 1
@@ -122,7 +122,11 @@ reset_plan_steps_to_pending() {
   fi
 
   now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  backup="${plan_file}.bak.$(date +%Y%m%d_%H%M%S)"
+  plan_dir="$(dirname "${plan_file}")"
+  backup_dir="${plan_dir}/.backups"
+  mkdir -p "${backup_dir}"
+  backup_name="$(basename "${plan_file}").bak.$(date +%Y%m%d_%H%M%S)"
+  backup="${backup_dir}/${backup_name}"
   cp "${plan_file}" "${backup}"
   tmp_file="${plan_file}.tmp"
 

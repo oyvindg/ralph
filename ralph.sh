@@ -44,6 +44,7 @@ init_runtime_defaults() {
   HUMAN_GUARD=""
   HUMAN_GUARD_ASSUME_YES=""
   HUMAN_GUARD_SCOPE=""
+  ALLOW_RALPH_EDITS=""
   TICKET=""
   SOURCE_CONTROL_ENABLED=""
   SOURCE_CONTROL_BACKEND=""
@@ -323,6 +324,7 @@ print_verbose_runtime_config() {
   [[ -n "${HOOKS_JSON_PATH}" ]] && echo "${C_DIM}|${C_RESET} hooks_json=$(to_rel_path "${HOOKS_JSON_PATH}")"
   [[ -n "${TASKS_JSON_PATH}" ]] && echo "${C_DIM}|${C_RESET} tasks_json=$(to_rel_path "${TASKS_JSON_PATH}")"
   echo "${C_DIM}|${C_RESET} human_guard=${HUMAN_GUARD} (${HUMAN_GUARD_SCOPE})"
+  echo "${C_DIM}|${C_RESET} allow_ralph_edits=${ALLOW_RALPH_EDITS}"
   echo "${C_DIM}|${C_RESET} language=${LANG_CODE}"
   echo "${C_DIM}+-------------------------------------------------+${C_RESET}"
 }
@@ -459,6 +461,7 @@ run_hook() {
   export RALPH_CHECKPOINT_PER_STEP="${CHECKPOINT_PER_STEP}"
   export RALPH_TIMEOUT="${TIMEOUT_SECONDS:-0}"
   export RALPH_DRY_RUN="${DRY_RUN}"
+  export RALPH_DRY_RUN_EXECUTE_TESTS="${DRY_RUN}"
   export RALPH_PROJECT_DIR="${RALPH_PROJECT_DIR:-}"
   export RALPH_GLOBAL_DIR="${RALPH_GLOBAL_DIR:-}"
   export RALPH_HUMAN_GUARD="${HUMAN_GUARD}"
@@ -598,6 +601,7 @@ Options:
       --human-guard <0|1> Enable/disable human approval guard
       --human-guard-assume-yes <0|1>  Auto-approve human guard prompts (CI)
       --human-guard-scope <session|step|both>  Where to enforce guard
+      --allow-ralph-edits <0|1>  Allow agent edits under .ralph/
       --skip-git-repo-check  Allow running in non-git directories
       --docker            Run in docker container
       --docker-build      Build docker image only
@@ -651,6 +655,7 @@ parse_args() {
       --human-guard) HUMAN_GUARD="${2:-}"; shift 2 ;;
       --human-guard-assume-yes) HUMAN_GUARD_ASSUME_YES="${2:-}"; shift 2 ;;
       --human-guard-scope) HUMAN_GUARD_SCOPE="${2:-}"; shift 2 ;;
+      --allow-ralph-edits) ALLOW_RALPH_EDITS="${2:-}"; shift 2 ;;
       --skip-git-repo-check) SKIP_GIT_CHECK=1; shift ;;
       --setup) SETUP_MODE=1; shift ;;
       --setup-force) SETUP_FORCE=1; shift ;;
@@ -781,6 +786,7 @@ validate_args() {
   [[ -z "${HUMAN_GUARD}" ]] && HUMAN_GUARD="${RALPH_HUMAN_GUARD:-${PROFILE_HUMAN_GUARD:-0}}"
   [[ -z "${HUMAN_GUARD_ASSUME_YES}" ]] && HUMAN_GUARD_ASSUME_YES="${RALPH_HUMAN_GUARD_ASSUME_YES:-${PROFILE_HUMAN_GUARD_ASSUME_YES:-0}}"
   [[ -z "${HUMAN_GUARD_SCOPE}" ]] && HUMAN_GUARD_SCOPE="${RALPH_HUMAN_GUARD_SCOPE:-${PROFILE_HUMAN_GUARD_SCOPE:-both}}"
+  [[ -z "${ALLOW_RALPH_EDITS}" ]] && ALLOW_RALPH_EDITS="${RALPH_ALLOW_RALPH_EDITS:-0}"
   if [[ "${VERBOSE}" -eq 0 ]]; then
     case "${RALPH_VERBOSE:-0}" in
       1|true|TRUE|yes|YES) VERBOSE=1 ;;
@@ -804,6 +810,12 @@ validate_args() {
   case "${HUMAN_GUARD_SCOPE}" in
     session|step|both) ;;
     *) echo "--human-guard-scope must be one of: session, step, both" >&2; exit 1 ;;
+  esac
+
+  case "${ALLOW_RALPH_EDITS}" in
+    1|true|TRUE|yes|YES) ALLOW_RALPH_EDITS=1 ;;
+    0|false|FALSE|no|NO) ALLOW_RALPH_EDITS=0 ;;
+    *) echo "--allow-ralph-edits must be 0/1 (or true/false)" >&2; exit 1 ;;
   esac
 
   SOURCE_CONTROL_BACKEND="$(printf '%s' "${SOURCE_CONTROL_BACKEND}" | tr '[:upper:]' '[:lower:]')"
@@ -1055,7 +1067,6 @@ run_ai_engine() {
 
   if [[ -n "${ai_hook}" ]]; then
     # Use ai hook
-    echo "${C_MAGENTA}[ai]${C_RESET}"
     run_ai_hook "${ai_hook}" "${prompt_file}" "${response_file}" "${engine_log}" "${i}"
   else
     # Fallback to built-in codex
@@ -1076,13 +1087,18 @@ run_ai_command_with_indicator() {
     ) >> "${engine_log}" 2>&1 &
     local pid=$!
     local elapsed=0
+    local printed=0
     while kill -0 "${pid}" 2>/dev/null; do
-      sleep 2
-      elapsed=$((elapsed + 2))
-      if (( elapsed % 10 == 0 )); then
-        echo "${C_DIM}[ai] working... ${elapsed}s${C_RESET}"
-      fi
+      sleep 1
+      elapsed=$((elapsed + 1))
+      # Keep progress on one terminal line instead of printing duplicates.
+      printf '\r%sworking...%s %ss' "${C_MAGENTA}" "${C_RESET}" "${elapsed}"
+      printed=1
     done
+    if [[ "${printed}" -eq 1 ]]; then
+      # Clear progress line before returning to normal output flow.
+      printf '\r\033[K'
+    fi
     wait "${pid}"
     rc=$?
     set -e
@@ -1215,7 +1231,7 @@ build_prompt() {
   local step_accept="${5:-}"
 
   {
-    echo "You are running iterative self-correction in repository: ${ROOT}"
+    echo "You are running iterative self-correction in repository: $(basename "${ROOT}")"
     echo ""
 
     # If we have a plan step, use it as the focus
@@ -1238,12 +1254,27 @@ build_prompt() {
       echo "${GUIDE_CONTENT}"
     fi
     echo ""
+    echo "Files that MUST NOT be modified in this step:"
+    if [[ "${ALLOW_RALPH_EDITS}" == "1" ]]; then
+      echo "- (none; .ralph edits explicitly allowed for this run)"
+    else
+      echo "- .ralph/** (all files under .ralph are read-only)"
+    fi
+    if [[ -n "${GUIDE_PATH}" ]]; then
+      echo "- $(to_rel_path "${GUIDE_PATH}") (read-only guide input)"
+    fi
+    echo ""
     echo "Constraints:"
     echo "1. Apply concrete edits directly in repo files when useful."
-    echo "2. Keep changes coherent and minimal per step."
-    echo "3. Focus ONLY on the current step. Do not work ahead."
-    echo "4. At the end of this step, write a summary in English using markdown formatting."
-    echo "5. Use headings (##### level), bullet points, and bold text for structure."
+    if [[ "${ALLOW_RALPH_EDITS}" == "1" ]]; then
+      echo "2. .ralph/ edits are allowed for this run."
+    else
+      echo "2. Only modify files outside .ralph/."
+    fi
+    echo "3. Keep changes coherent and minimal per step."
+    echo "4. Focus ONLY on the current step. Do not work ahead."
+    echo "5. At the end of this step, write a summary in English using markdown formatting."
+    echo "6. Use headings (##### level), bullet points, and bold text for structure."
     echo ""
     echo "Previous step output (if any):"
     cat "${last_response}"
@@ -1327,9 +1358,6 @@ collect_response_stats() {
     response_words=0
     response_chars=0
     detected_tokens=""
-    if [[ "${DRY_RUN}" -ne 1 ]] && [[ "${rc}" -eq 0 ]]; then
-      echo "${C_YELLOW}[${i}/${total_steps}] WARNING: Empty response from codex${C_RESET}" >&2
-    fi
   fi
 
   if [[ "${DRY_RUN}" -eq 1 ]]; then
@@ -1444,7 +1472,7 @@ run_step() {
     iter_start_iso="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
     set +e
-    run_ai_engine "${prompt_file}" "${response_file}" "${engine_log}" "${i}"
+    #run_ai_engine "${prompt_file}" "${response_file}" "${engine_log}" "${i}"
     rc=$?
     set -e
 
@@ -1459,6 +1487,11 @@ run_step() {
     # Process results
     check_step_errors "${i}" "${engine_log}"
     collect_response_stats "${i}" "${engine_log}" "${rc}"
+    if [[ "${DRY_RUN}" -ne 1 ]] && [[ "${rc}" -eq 0 ]] && [[ "${response_chars}" -eq 0 ]]; then
+      echo "${C_RED}[${i}/${total_steps}] ERROR: Empty response from ${ACTIVE_ENGINE:-${RALPH_ENGINE:-unknown}}${C_RESET}" >&2
+      run_hook "on-error" "${i}" "${rc}"
+      return 1
+    fi
     write_step_details "${i}" "${prompt_file}" "${response_file}" "${engine_log}" "${rc}" "${iter_start_iso}" "${iter_end_iso}" "${iter_duration_sec}" "${total_steps}"
 
     # Print step duration
@@ -1482,12 +1515,21 @@ run_step() {
         ((retry_count++))
         continue
         ;;
+      130|143) return 130 ;;
       *) return 1 ;;
     esac
   done
 
   # Hook: after-step
-  if ! run_required_step_hook "after-step" "${i}" "0" "after-step hook failed"; then
+  local after_step_rc=0
+  set +e
+  run_required_step_hook "after-step" "${i}" "0" "after-step hook failed"
+  after_step_rc=$?
+  set -e
+  if [[ "${after_step_rc}" -eq 130 || "${after_step_rc}" -eq 143 ]]; then
+    return 130
+  fi
+  if [[ "${after_step_rc}" -ne 0 ]]; then
     return 1
   fi
 
@@ -1530,8 +1572,14 @@ main() {
     finalize_summary
     exit 1
   fi
+  if [[ "${hook_rc}" -eq 130 || "${hook_rc}" -eq 143 ]]; then
+    echo "${C_YELLOW}[session] before-session interrupted${C_RESET}" >&2
+    finalize_summary
+    exit 130
+  fi
 
   local session_failed=0
+  local session_interrupted=0
   local completed_steps=0
 
   # Check if plan-driven mode (plan.json exists after before-session)
@@ -1570,7 +1618,16 @@ main() {
       step_desc=$(echo "${step_json}" | jq -r '.description')
       step_accept=$(echo "${step_json}" | jq -r '.acceptance')
 
-      if ! run_step "${i}" "${step_id}" "${step_desc}" "${step_accept}"; then
+      local step_rc=0
+      set +e
+      run_step "${i}" "${step_id}" "${step_desc}" "${step_accept}"
+      step_rc=$?
+      set -e
+      if [[ "${step_rc}" -eq 130 || "${step_rc}" -eq 143 ]]; then
+        session_interrupted=1
+        break
+      fi
+      if [[ "${step_rc}" -ne 0 ]]; then
         session_failed=1
         break
       fi
@@ -1595,7 +1652,16 @@ main() {
     echo "${C_CYAN}[session]${C_RESET} Step mode: ${num_steps} step(s)"
 
     for ((i=1; i<=num_steps; i++)); do
-      if ! run_step "${i}"; then
+      local step_rc=0
+      set +e
+      run_step "${i}"
+      step_rc=$?
+      set -e
+      if [[ "${step_rc}" -eq 130 || "${step_rc}" -eq 143 ]]; then
+        session_interrupted=1
+        break
+      fi
+      if [[ "${step_rc}" -ne 0 ]]; then
         session_failed=1
         break
       fi
@@ -1611,6 +1677,7 @@ main() {
   finalize_summary
   print_completion "${completed_steps}"
 
+  [[ "${session_interrupted}" -eq 1 ]] && exit 130
   [[ "${session_failed}" -eq 1 ]] && exit 1
   exit 0
 }

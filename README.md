@@ -1,4 +1,4 @@
-# Ralph
+# ralph
 
 Ralph is a repeatable AI work loop for getting meaningful progress on complex tasks instead of one-off chat answers. You give it a goal, it works in steps, checks the result after each step, and keeps going until the plan is complete or you stop it.
 
@@ -111,7 +111,7 @@ Main extension points live in `.ralph/`:
 
 - `profile.jsonc`: defaults and runtime behavior
 - `hooks.jsonc`: command hooks by lifecycle event
-- `tasks.json`: reusable task definitions
+- `tasks.jsonc`: reusable task definitions
 - `plans/`: reusable plan templates
 
 Project-local `.ralph/` overrides global `~/.ralph/`.

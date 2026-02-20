@@ -21,7 +21,19 @@ run_required_step_hook() {
     run_hook "on-error" "${step}" "${hook_rc}"
     return 1
   fi
+  if [[ "${hook_rc}" -eq 130 || "${hook_rc}" -eq 143 ]]; then
+    echo "${C_YELLOW}${hook_name} interrupted${C_RESET}" >&2
+    return 130
+  fi
   return 0
+}
+
+quality_gate_failure_hint() {
+  local hint="Check [quality-gate]/[human-gate] lines above for root cause (tests, human rejection, or hooks config)."
+  if [[ -n "${session_dir:-}" ]] && [[ -f "${session_dir}/hooks.log" ]]; then
+    hint="${hint} hooks.log: ${session_dir}/hooks.log"
+  fi
+  printf '%s' "${hint}"
 }
 
 # Evaluates quality-gate result and returns next action:
@@ -45,7 +57,7 @@ evaluate_quality_gate_action() {
       return 0
       ;;
     1)
-      echo "${C_RED}quality-gate failed${C_RESET}" >&2
+      echo "${C_RED}quality-gate failed${C_RESET}: $(quality_gate_failure_hint)" >&2
       run_hook "on-error" "${step}" "${hook_rc}"
       return 1
       ;;
@@ -64,6 +76,10 @@ evaluate_quality_gate_action() {
       fi
       echo "${C_YELLOW}quality-gate requested retry (${next_retry}/${max_retries})${C_RESET}"
       return 3
+      ;;
+    130|143)
+      echo "${C_YELLOW}quality-gate interrupted${C_RESET}" >&2
+      return 130
       ;;
     *)
       echo "${C_RED}quality-gate returned unknown exit code ${hook_rc}${C_RESET}" >&2

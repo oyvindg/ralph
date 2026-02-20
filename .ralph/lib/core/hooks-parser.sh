@@ -18,6 +18,8 @@ fi
 : "${C_DIM:=}"
 : "${C_YELLOW:=}"
 : "${C_MAGENTA:=}"
+# Runtime defaults when sourced outside full CLI bootstrap.
+: "${DRY_RUN:=0}"
 
 # Resolves language file path by precedence: project -> global -> bundled.
 json_hook_lang_file_path() {
@@ -180,17 +182,18 @@ run_json_hook_command_entry() {
     return 0
   fi
 
-  # Allow run to reference task commands directly:
-  # - run: "task:my.task"
-  # - run: "{tasks.my.task}"
-  if [[ "${cmd}" == task:* || "${cmd}" =~ ^\{tasks\.[^}]+\}$ ]]; then
-    local resolved_cmd
-    resolved_cmd="$(json_hook_when_task_command "${cmd}" "${tasks_file}")"
-    if [[ -z "${resolved_cmd}" ]]; then
-      echo "${C_YELLOW}[hooks.json]${C_RESET} ${event}: run task not found: ${cmd}"
+  # Expand task references in run expression:
+  # - Full reference: "task:my.task" or "{tasks.my.task}"
+  # - Inline chaining: "task:a && task:b && ./script.sh"
+  # - Mixed: "{tasks.cleanup} && task:deploy.staging"
+  if [[ "${cmd}" == *task:* || "${cmd}" == *{tasks.* || "${cmd}" == *{conditions.* ]]; then
+    local expanded_cmd
+    expanded_cmd="$(json_hook_expand_run_placeholders "${cmd}" "${tasks_file}")"
+    if [[ -z "${expanded_cmd}" ]]; then
+      echo "${C_YELLOW}[hooks.json]${C_RESET} ${event}: run task expansion failed: ${cmd}"
       return 0
     fi
-    cmd="${resolved_cmd}"
+    cmd="${expanded_cmd}"
   fi
 
   if ! json_hook_when_matches "${when_expr}" "${tasks_file}" "${cwd_rel}"; then
@@ -205,7 +208,7 @@ run_json_hook_command_entry() {
 
   if [[ "${human_gate}" == "1" ]]; then
     prompt_text="$(json_hook_localize "${prompt_text}" "${prompt_text}")"
-    if [[ "${HUMAN_GUARD_ASSUME_YES}" == "1" ]]; then
+    if [[ "${RALPH_HUMAN_GUARD_ASSUME_YES:-0}" == "1" ]]; then
       echo "${C_DIM}[hooks.json]${C_RESET} ${event}: auto-approved (assume-yes): ${cmd}"
       state_record_choice "hooks.json" "${event}" "approved" "assume-yes: ${cmd}" || true
     else
@@ -301,6 +304,66 @@ json_hook_expand_when_placeholders() {
   printf '%s\n' "${out}"
 }
 
+# Expands task references in run-expression to actual shell commands.
+# Supports:
+#   - {tasks.my.task} placeholder syntax
+#   - task:my.task prefix syntax (standalone or inline)
+# Example:
+#   "task:utils.cleanup && ./deploy.sh" -> "( rm -rf tmp ) && ./deploy.sh"
+#   "{tasks.a} && {tasks.b}" -> "( cmd-a ) && ( cmd-b )"
+json_hook_expand_run_placeholders() {
+  local expr="$1"
+  local tasks_file="$2"
+  local out="${expr}"
+  local guard=0
+
+  # Expand {tasks.ref} placeholders
+  while [[ "${out}" =~ (^|[^$])(\{([^{}]+)\}) ]]; do
+    ((guard++)) || true
+    if [[ "${guard}" -gt 64 ]]; then
+      echo "${C_YELLOW}[hooks.json]${C_RESET} run placeholder expansion limit reached" >&2
+      return 1
+    fi
+
+    local prefix="${BASH_REMATCH[1]}"
+    local token="${BASH_REMATCH[2]}"
+    local ref="${BASH_REMATCH[3]}"
+    local cmd
+    cmd="$(json_hook_when_task_command "${ref}" "${tasks_file}")"
+    if [[ -z "${cmd}" ]]; then
+      echo "${C_YELLOW}[hooks.json]${C_RESET} run task not found: ${ref}" >&2
+      return 1
+    fi
+
+    out="${out/${prefix}${token}/${prefix}( ${cmd} )}"
+  done
+
+  # Expand task:ref patterns (word boundary aware)
+  # Matches: task:name.path at start, after space, or after shell operators
+  guard=0
+  while [[ "${out}" =~ (^|[[:space:]]|[;\&\|])task:([a-zA-Z0-9._-]+) ]]; do
+    ((guard++)) || true
+    if [[ "${guard}" -gt 64 ]]; then
+      echo "${C_YELLOW}[hooks.json]${C_RESET} run task: expansion limit reached" >&2
+      return 1
+    fi
+
+    local prefix="${BASH_REMATCH[1]}"
+    local ref="${BASH_REMATCH[2]}"
+    local pattern="${prefix}task:${ref}"
+    local cmd
+    cmd="$(json_hook_when_task_command "${ref}" "${tasks_file}")"
+    if [[ -z "${cmd}" ]]; then
+      echo "${C_YELLOW}[hooks.json]${C_RESET} run task not found: ${ref}" >&2
+      return 1
+    fi
+
+    out="${out/${pattern}/${prefix}( ${cmd} )}"
+  done
+
+  printf '%s\n' "${out}"
+}
+
 # Evaluates one hooks.json when-clause.
 # Supported formats:
 # - "<shell expression>"
@@ -331,6 +394,9 @@ json_hook_when_matches() {
       raw="$(printf '%s' "${raw}" | jq -c '.' 2>/dev/null || printf '%s' "${raw}")"
       ;;
   esac
+
+  # Empty JSON strings (e.g. when: "") mean "no condition".
+  [[ -z "${raw}" ]] && return 0
 
   if [[ -n "${cwd_rel}" ]]; then
     if [[ "${cwd_rel}" == /* ]]; then
@@ -406,7 +472,6 @@ run_json_hook_select_entry() {
       | .[]
       | {
           code: (.code // ""),
-          task: (.task // ""),
           label: (.label // .code // .run // "option"),
           run: (.run // .cmd // ""),
           when: (.when // ""),
@@ -434,7 +499,7 @@ run_json_hook_select_entry() {
           cwd: (.cwd // ""),
           run_in_dry_run: (.run_in_dry_run // false)
         }
-      | select((.run != "") or (.task != ""))
+      | select(.run != "")
       | @base64
     ' 2>/dev/null || true
   )
@@ -454,7 +519,6 @@ run_json_hook_select_entry() {
       fi
       p="$(printf '%s' "${option_payloads[$((idx - 1))]}" | base64 -d 2>/dev/null || true)"
       [[ -n "${p}" ]] || continue
-      p="$(expand_json_hook_task "${p}" "${tasks_file}")"
       state_record_choice "hooks.json" "${event}" "select" "$(printf '%s' "${p}" | jq -r '.code // .label // "option"')" || true
       run_json_hook_command_entry \
         "${event}" \
@@ -475,7 +539,7 @@ run_json_hook_select_entry() {
   fi
 
   local selected
-  if [[ "${HUMAN_GUARD_ASSUME_YES}" == "1" ]]; then
+  if [[ "${RALPH_HUMAN_GUARD_ASSUME_YES:-0}" == "1" ]]; then
     selected="1"
   else
     selected="$(json_hook_prompt_single "${prompt}" "${option_labels[@]}" || true)"
@@ -486,7 +550,6 @@ run_json_hook_select_entry() {
   fi
   p="$(printf '%s' "${option_payloads[$((selected - 1))]}" | base64 -d 2>/dev/null || true)"
   [[ -n "${p}" ]] || return 0
-  p="$(expand_json_hook_task "${p}" "${tasks_file}")"
   state_record_choice "hooks.json" "${event}" "select" "$(printf '%s' "${p}" | jq -r '.code // .label // "option"')" || true
   run_json_hook_command_entry \
     "${event}" \
@@ -807,7 +870,6 @@ run_json_hook_commands() {
         {
           type: (if (.select // null) != null then "select" else "run" end),
           select: (.select // null),
-          task: (.task // ""),
           run: (.run // .cmd // ""),
           when: (.when // ""),
           human_gate: (
@@ -843,7 +905,7 @@ run_json_hook_commands() {
       else [] end
     | .[]
     | to_command
-    | select((.type == "select") or (.run != "") or (.task != ""))
+    | select((.type == "select") or (.run != ""))
     | @base64
   ' "${hooks_file}" 2>/dev/null || true)"
 
@@ -873,8 +935,6 @@ run_json_hook_commands() {
       run_json_hook_select_entry "${event}" "${payload}" "${stop_on_error}" "${step}" "${step_exit_code}" "${tasks_file}" || return $?
       continue
     fi
-
-    payload="$(expand_json_hook_task "${payload}" "${tasks_file}")"
 
     cmd="$(printf '%s' "${payload}" | jq -r '.run // empty')"
     if [[ -z "${cmd}" ]]; then

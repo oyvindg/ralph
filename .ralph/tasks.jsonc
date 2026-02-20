@@ -37,6 +37,14 @@
       "run": "RALPH_HOOK_DEPTH=\"$(( ${RALPH_HOOK_DEPTH:-0} + 1 ))\" \"${RALPH_PROJECT_DIR:-${RALPH_WORKSPACE}/.ralph}/lib/tasks/version-control.task.sh\"",
       "run_in_dry_run": false,
       "allow_failure": true
+    },
+    "version": {
+      "git-rev-short": {
+        "run": "git -C \"${repo_root:-.}\" rev-parse --short HEAD 2>/dev/null || true"
+      },
+      "print": {
+        "run": "git_rev=\"$(git -C \"${repo_root:-.}\" rev-parse --short HEAD 2>/dev/null || true)\"; if [[ -n \"${git_rev}\" ]]; then echo \"ralph ${RALPH_VERSION} (${git_rev})\"; else echo \"ralph ${RALPH_VERSION}\"; fi"
+      }
     }
   }
 }

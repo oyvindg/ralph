@@ -23,6 +23,12 @@ run_ok() {
   fi
 }
 
+run_fail() {
+  if "$@" >/dev/null 2>&1; then
+    fail "command unexpectedly succeeded: $*"
+  fi
+}
+
 # --help and --version (direct behavior)
 run_ok "${RALPH}" --help
 run_ok "${RALPH}" --version
@@ -51,6 +57,7 @@ run_ok "${RALPH}" --verbose --help
 run_ok "${RALPH}" --human-guard 0 --help
 run_ok "${RALPH}" --human-guard-assume-yes 1 --help
 run_ok "${RALPH}" --human-guard-scope both --help
+run_ok "${RALPH}" --allow-ralph-edits 1 --help
 run_ok "${RALPH}" --skip-git-repo-check --help
 run_ok "${RALPH}" --setup-force --help
 run_ok "${RALPH}" --setup-target "${TMP_SETUP_TARGET}" --help

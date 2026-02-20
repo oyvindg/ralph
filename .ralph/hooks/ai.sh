@@ -369,6 +369,27 @@ validate_inputs() {
   fi
 }
 
+# Validates known incompatible model/engine combinations in adapter layer.
+validate_engine_model_compatibility() {
+  local selected_engine selected_model
+  selected_engine="$(printf '%s' "${ENGINE}" | tr '[:upper:]' '[:lower:]')"
+  selected_model="$(printf '%s' "${MODEL}" | tr '[:upper:]' '[:lower:]')"
+
+  [[ -n "${selected_model}" ]] || return 0
+
+  if [[ "${selected_engine}" == "codex" ]] && [[ "${selected_model}" =~ ^claude([:-]|$) ]]; then
+    echo "[ai] ERROR: invalid model/engine combination: engine=codex model=${MODEL}" >&2
+    echo "[ai] Use engine=claude with Claude models, or choose a Codex-compatible model." >&2
+    exit 1
+  fi
+
+  if [[ "${selected_engine}" == "claude" ]] && [[ "${selected_model}" =~ (^gpt[-:]|codex) ]]; then
+    echo "[ai] ERROR: invalid model/engine combination: engine=claude model=${MODEL}" >&2
+    echo "[ai] Use a Claude model (e.g. claude-sonnet-*) or omit model for Claude default." >&2
+    exit 1
+  fi
+}
+
 # =============================================================================
 # Verify Response
 # =============================================================================
@@ -410,6 +431,7 @@ main() {
   fi
 
   validate_inputs
+  validate_engine_model_compatibility
 
   echo "[ai] Engine: ${ENGINE}"
   [[ -n "${MODEL}" ]] && echo "[ai] Model: ${MODEL}"
