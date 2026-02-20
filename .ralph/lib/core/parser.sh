@@ -174,6 +174,7 @@ run_json_hook_command_entry() {
   local step="${11:-}"
   local step_exit_code="${12:-}"
   local tasks_file="${13:-}"
+  local on_failure="${14:-}"
 
   local cwd_abs rc
 
@@ -183,10 +184,10 @@ run_json_hook_command_entry() {
   fi
 
   # Expand task references in run expression:
-  # - Full reference: "task:my.task" or "{tasks.my.task}"
+  # - Full reference: "task:my.task" or "{{my.task}}"
   # - Inline chaining: "task:a && task:b && ./script.sh"
-  # - Mixed: "{tasks.cleanup} && task:deploy.staging"
-  if [[ "${cmd}" == *task:* || "${cmd}" == *{tasks.* || "${cmd}" == *{conditions.* ]]; then
+  # - Mixed: "{{cleanup}} && task:deploy.staging"
+  if [[ "${cmd}" == *task:* || "${cmd}" == *"{{"* ]]; then
     local expanded_cmd
     expanded_cmd="$(json_hook_expand_run_placeholders "${cmd}" "${tasks_file}")"
     if [[ -z "${expanded_cmd}" ]]; then
@@ -252,6 +253,10 @@ run_json_hook_command_entry() {
   set -e
   if [[ "${rc}" -ne 0 ]]; then
     echo "${C_YELLOW}[hooks.json]${C_RESET} ${event}: command failed (${rc})"
+    # on_failure: "abort" takes precedence
+    if [[ "${on_failure}" == "abort" ]]; then
+      return "${rc}"
+    fi
     if [[ "${allow_failure}" != "1" && "${stop_on_error}" == "true" ]]; then
       return "${rc}"
     fi
@@ -272,32 +277,38 @@ json_hook_when_task_command() {
   local cmd=""
   cmd="$(printf '%s' "${payload}" | jq -r '.run // .cmd // empty' 2>/dev/null || true)"
   if [[ -n "${cmd}" && -n "${tasks_file}" ]]; then
-    local expanded
-    expanded="$(json_hook_expand_run_placeholders "${cmd}" "${tasks_file}" || true)"
-    [[ -n "${expanded}" ]] && cmd="${expanded}"
+    # Only attempt expansion if there are task references
+    if [[ "${cmd}" == *"{{"* || "${cmd}" == *"task:"* ]]; then
+      local expanded
+      expanded="$(json_hook_expand_run_placeholders "${cmd}" "${tasks_file}")"
+      if [[ -n "${expanded}" ]]; then
+        cmd="${expanded}"
+      else
+        echo "[parser] Warning: task expansion failed for: ${cmd} (tasks_file=${tasks_file})" >&2
+      fi
+    fi
   fi
   printf '%s' "${cmd}"
 }
 
-# Expands {task.ref} placeholders in when-expression to runnable shell clauses.
+# Expands {{task.ref}} placeholders in when-expression to runnable shell clauses.
 # Example:
-#   "{conditions.a} && {conditions.b}" -> "( <cmd-a> ) && ( <cmd-b> )"
+#   "{{conditions.a}} && {{conditions.b}}" -> "( <cmd-a> ) && ( <cmd-b> )"
 json_hook_expand_when_placeholders() {
   local expr="$1"
   local tasks_file="$2"
   local out="${expr}"
   local guard=0
 
-  while [[ "${out}" =~ (^|[^$])(\{([^{}]+)\}) ]]; do
+  while [[ "${out}" =~ \{\{([a-zA-Z0-9._-]+)\}\} ]]; do
     ((guard++)) || true
     if [[ "${guard}" -gt 64 ]]; then
       echo "${C_YELLOW}[hooks.json]${C_RESET} when placeholder expansion limit reached" >&2
       return 1
     fi
 
-    local prefix="${BASH_REMATCH[1]}"
-    local token="${BASH_REMATCH[2]}"
-    local ref="${BASH_REMATCH[3]}"
+    local token="${BASH_REMATCH[0]}"
+    local ref="${BASH_REMATCH[1]}"
     local cmd
     cmd="$(json_hook_when_task_command "${ref}" "${tasks_file}")"
     if [[ -z "${cmd}" ]]; then
@@ -305,7 +316,7 @@ json_hook_expand_when_placeholders() {
       return 1
     fi
 
-    out="${out/${prefix}${token}/${prefix}( ${cmd} )}"
+    out="${out/${token}/( ${cmd} )}"
   done
 
   printf '%s\n' "${out}"
@@ -313,42 +324,41 @@ json_hook_expand_when_placeholders() {
 
 # Expands task references in run-expression to actual shell commands.
 # Supports:
-#   - {tasks.my.task} placeholder syntax
+#   - {{my.task}} double-brace placeholder syntax
 #   - task:my.task prefix syntax (standalone or inline)
 # Example:
 #   "task:utils.cleanup && ./deploy.sh" -> "( rm -rf tmp ) && ./deploy.sh"
-#   "{tasks.a} && {tasks.b}" -> "( cmd-a ) && ( cmd-b )"
+#   "{{a}} && {{b}}" -> "( cmd-a ) && ( cmd-b )"
 json_hook_expand_run_placeholders() {
   local expr="$1"
   local tasks_file="$2"
   local out="${expr}"
   local guard=0
 
-  # Expand {tasks.ref} placeholders
-  while [[ "${out}" =~ (^|[^$])(\{([^{}]+)\}) ]]; do
+  # Expand {{task.ref}} placeholders (double-brace syntax)
+  while [[ "${out}" =~ \{\{([a-zA-Z0-9._-]+)\}\} ]]; do
     ((guard++)) || true
     if [[ "${guard}" -gt 64 ]]; then
       echo "${C_YELLOW}[hooks.json]${C_RESET} run placeholder expansion limit reached" >&2
       return 1
     fi
 
-    local prefix="${BASH_REMATCH[1]}"
-    local token="${BASH_REMATCH[2]}"
-    local ref="${BASH_REMATCH[3]}"
+    local token="${BASH_REMATCH[0]}"
+    local ref="${BASH_REMATCH[1]}"
     local cmd
     cmd="$(json_hook_when_task_command "${ref}" "${tasks_file}")"
     if [[ -z "${cmd}" ]]; then
-      echo "${C_YELLOW}[hooks.json]${C_RESET} run task not found: ${ref}" >&2
+      echo "${C_YELLOW}[hooks.json]${C_RESET} run {{task}} not found: ${ref} (file=${tasks_file:-EMPTY})" >&2
       return 1
     fi
 
-    out="${out/${prefix}${token}/${prefix}( ${cmd} )}"
+    out="${out/${token}/( ${cmd} )}"
   done
 
   # Expand task:ref patterns (word boundary aware)
   # Matches: task:name.path at start, after space, or after shell operators
   guard=0
-  while [[ "${out}" =~ (^|[[:space:]]|[;\&\|])task:([a-zA-Z0-9._-]+) ]]; do
+  while [[ "${out}" =~ (^|[[:space:]]|[^a-zA-Z0-9._-])task:([a-zA-Z0-9._-]+) ]]; do
     ((guard++)) || true
     if [[ "${guard}" -gt 64 ]]; then
       echo "${C_YELLOW}[hooks.json]${C_RESET} run task: expansion limit reached" >&2
@@ -361,7 +371,7 @@ json_hook_expand_run_placeholders() {
     local cmd
     cmd="$(json_hook_when_task_command "${ref}" "${tasks_file}")"
     if [[ -z "${cmd}" ]]; then
-      echo "${C_YELLOW}[hooks.json]${C_RESET} run task not found: ${ref}" >&2
+      echo "${C_YELLOW}[hooks.json]${C_RESET} run task: not found: ${ref} (file=${tasks_file:-EMPTY})" >&2
       return 1
     fi
 
@@ -540,7 +550,8 @@ run_json_hook_select_entry() {
         "${stop_on_error}" \
         "${step}" \
         "${step_exit_code}" \
-        "${tasks_file}" || return $?
+        "${tasks_file}" \
+        "$(printf '%s' "${p}" | jq -r '.on_failure // empty')" || return $?
     done
     return 0
   fi
@@ -571,7 +582,8 @@ run_json_hook_select_entry() {
     "${stop_on_error}" \
     "${step}" \
     "${step_exit_code}" \
-    "${tasks_file}" || return $?
+    "${tasks_file}" \
+    "$(printf '%s' "${p}" | jq -r '.on_failure // empty')" || return $?
 }
 
 # Resolves include path relative to parent hooks.json file.
@@ -820,14 +832,18 @@ expand_json_hook_task() {
 # Normalizes task reference formats to dotted task key.
 # Supported input examples:
 # - "task:wizard.workflow-coding"
-# - "{tasks.wizard.workflow-coding}"
-# - "{wizard.workflow-coding}"
+# - "{{wizard.workflow-coding}}"
 # - "wizard.workflow-coding"
 json_hook_normalize_task_ref() {
   local ref="${1:-}"
   [[ -z "${ref}" ]] && return 0
 
   ref="${ref#task:}"
+  # Strip double braces {{...}}
+  if [[ "${ref}" =~ ^\{\{(.+)\}\}$ ]]; then
+    ref="${BASH_REMATCH[1]}"
+  fi
+  # Strip single braces {...} (legacy)
   if [[ "${ref}" =~ ^\{(.+)\}$ ]]; then
     ref="${BASH_REMATCH[1]}"
   fi
@@ -923,7 +939,7 @@ run_json_hook_commands() {
   lines="$(jq -r --arg event "${event}" --arg phase "${phase}" '
     def to_command:
       if type == "string" then
-        {type:"run", run: ., when: "", human_gate: false, prompt: "", default_yes: false, allow_failure: false, cwd: "", run_in_dry_run: false}
+        {type:"run", run: ., when: "", human_gate: false, prompt: "", default_yes: false, allow_failure: false, on_failure: "", cwd: "", run_in_dry_run: false}
       elif type == "object" then
         {
           type: (if (.select // null) != null then "select" else "run" end),
@@ -951,6 +967,7 @@ run_json_hook_commands() {
             else false end
           ),
           allow_failure: (.allow_failure // false),
+          on_failure: (.on_failure // ""),
           cwd: (.cwd // ""),
           run_in_dry_run: (.run_in_dry_run // false)
         }
@@ -969,7 +986,7 @@ run_json_hook_commands() {
 
   [[ -n "${lines}" ]] || return 0
 
-  local line payload entry_type cmd human_gate prompt_text default_yes allow_failure cwd_rel run_in_dry_run
+  local line payload entry_type cmd human_gate prompt_text default_yes allow_failure cwd_rel run_in_dry_run on_failure
   while IFS= read -r line; do
     [[ -n "${line}" ]] || continue
     payload="$(printf '%s' "${line}" | base64 -d 2>/dev/null || true)"
@@ -1005,6 +1022,7 @@ run_json_hook_commands() {
     allow_failure="$(printf '%s' "${payload}" | jq -r 'if .allow_failure then "1" else "0" end')"
     cwd_rel="$(printf '%s' "${payload}" | jq -r '.cwd // empty')"
     run_in_dry_run="$(printf '%s' "${payload}" | jq -r 'if .run_in_dry_run then "1" else "0" end')"
+    on_failure="$(printf '%s' "${payload}" | jq -r '.on_failure // empty')"
 
     run_json_hook_command_entry \
       "${event}" \
@@ -1019,7 +1037,8 @@ run_json_hook_commands() {
       "${stop_on_error}" \
       "${step}" \
       "${step_exit_code}" \
-      "${tasks_file}" || return $?
+      "${tasks_file}" \
+      "${on_failure}" || return $?
   done <<< "${lines}"
 
   rm -f "${merged_hooks_file}" "${merged_tasks_file}"

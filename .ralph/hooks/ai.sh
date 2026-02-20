@@ -95,12 +95,14 @@ run_engine() {
   run_cmd="$(get_engine_prop "${code}" "run")"
   [[ -n "${run_cmd}" ]] || { echo "[ai] ERROR: No run command for engine: ${code}" >&2; return 1; }
 
-  # Expand task references if present
-  if [[ "${run_cmd}" == task:* ]]; then
-    run_task "${run_cmd#task:}"
-  else
-    bash -c "${run_cmd}"
+  # Expand {{task}} references if present
+  if [[ "${run_cmd}" == *"{{"* ]]; then
+    local expanded
+    expanded="$(json_hook_expand_run_placeholders "${run_cmd}" "${RALPH_TASKS_FILE:-}")"
+    [[ -n "${expanded}" ]] && run_cmd="${expanded}"
   fi
+
+  bash -c "${run_cmd}"
 }
 
 # =============================================================================

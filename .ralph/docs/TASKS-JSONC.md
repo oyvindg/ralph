@@ -219,7 +219,7 @@ Custom phases are invoked explicitly by Ralph internals or shell hooks.
 | `allow_failure` | boolean | `false` | Continue even if command fails |
 | `run_in_dry_run` | boolean | `false` | Execute even in dry-run mode |
 | `human_gate` | boolean/object | `false` | Require user confirmation |
-| `prompt` | string | - | Approval prompt text or `{lang.key}` |
+| `prompt` | string | - | Approval prompt text or `lang:key` |
 
 ## Task Object vs Array Format
 
@@ -248,7 +248,7 @@ Both formats can be referenced the same way from hooks.jsonc.
 
 ## Referencing Tasks from hooks.jsonc
 
-Tasks are referenced using the `run` field with `task:` prefix or `{tasks.}` placeholder syntax.
+Tasks are referenced using the `run` field with `task:` prefix.
 
 ### Basic Task Reference
 
@@ -278,7 +278,7 @@ Tasks are referenced using the `run` field with `task:` prefix or `{tasks.}` pla
 {
   "after-step": {
     "system": [
-      { "run": "{tasks.my-task-name}" }
+      { "run": "task:tasks.my-task-name" }
     ]
   }
 }
@@ -304,14 +304,13 @@ Dotted paths are resolved as nested keys from the root `tasks` object:
 // Reference as:
 // - task:conditions.empty-workspace
 // - task:wizard.workflow-coding
-// - {tasks.conditions.empty-workspace}
 ```
 
 ### Cross-Referencing Tasks
 
 Tasks can reference other tasks anywhere in the hierarchy. All paths are resolved from the root `tasks` object.
 
-**In `when` expressions** - use `task:` prefix or `{tasks.path}` placeholders:
+**In `when` expressions** - use `task:` prefix or `task:path` placeholders:
 
 ```jsonc
 {
@@ -324,7 +323,7 @@ Tasks can reference other tasks anywhere in the hierarchy. All paths are resolve
     "deploy": {
       "staging": {
         // Reference conditions from sibling branch
-        "when": "{tasks.conditions.is-git-repo} && {tasks.conditions.has-changes}",
+        "when": "task:conditions.is-git-repo} && {task:conditions.has-changes}",
         "run": "./deploy.sh staging"
       }
     }
@@ -352,7 +351,7 @@ Tasks can reference other tasks anywhere in the hierarchy. All paths are resolve
 
       // Mixed placeholder and task: syntax
       "production": {
-        "run": "{tasks.utils.cleanup} && ./deploy.sh prod && task:utils.notify"
+        "run": "task:tasks.utils.cleanup && ./deploy.sh prod && task:utils.notify"
       }
     }
   }
@@ -361,7 +360,7 @@ Tasks can reference other tasks anywhere in the hierarchy. All paths are resolve
 
 Supported inline patterns:
 - `task:utils.cleanup && task:utils.notify` - chained tasks
-- `{tasks.utils.cleanup} && ./script.sh` - placeholder with shell
+- `task:tasks.utils.cleanup && ./script.sh` - task with shell
 - `echo START | task:utils.step1` - task after pipe
 - `task:a; task:b` - task after semicolon
 
@@ -457,7 +456,7 @@ Combine multiple conditions with shell operators:
   "before-session": {
     "before-system": [
       {
-        "when": "{tasks.conditions.workspace-empty} && {tasks.conditions.workflow-not-set}",
+        "when": "task:conditions.workspace-empty && task:conditions.workflow-not-set",
         "select": { ... }
       }
     ]
@@ -544,14 +543,14 @@ With custom prompt:
 
 ## Localization
 
-Prompts and labels support `{lang.key}` syntax:
+Prompts and labels support `lang:key` syntax:
 
 ```jsonc
 {
   "tasks": {
     "deploy": {
       "run": "deploy.sh",
-      "prompt": "{deploy.confirm}"
+      "prompt": "lang:deploy.confirm"
     }
   }
 }
@@ -676,7 +675,7 @@ Note: Comments must be on dedicated lines (not inline after values).
     "before-system": [
       {
         "run": "task:setup.install-deps",
-        "when": "{tasks.conditions.is-node-project}",
+        "when": "task:conditions.is-node-project}",
         "allow_failure": true
       }
     ]
@@ -686,7 +685,7 @@ Note: Comments must be on dedicated lines (not inline after values).
     "after-system": [
       {
         "run": "task:vcs.auto-commit",
-        "when": "{tasks.conditions.has-uncommitted}",
+        "when": "task:conditions.has-uncommitted",
         "human_gate": true
       }
     ]

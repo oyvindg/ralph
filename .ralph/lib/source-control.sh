@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
 # Generic version-control helpers for Ralph hooks.
+# Delegates to task:vcs.* and task:git.* from tasks.jsonc.
 set -euo pipefail
 
+SC_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # shellcheck disable=SC1091
-source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/git.sh"
+source "${SC_LIB_DIR}/git.sh"
+
+# Load parser for run_task/task_condition helpers
+if [[ -f "${SC_LIB_DIR}/core/parser.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${SC_LIB_DIR}/core/parser.sh"
+fi
 
 # Returns 0 when input value represents true (1/true/yes).
 sc_is_true() {
@@ -16,70 +25,59 @@ sc_is_true() {
 # Converts goal text to a branch-safe slug.
 sc_goal_slug() {
   local input="${1:-goal}"
-  input="$(printf '%s' "${input}" | tr '[:upper:]' '[:lower:]')"
-  input="$(printf '%s' "${input}" | sed 's/[^a-z0-9._-]/-/g; s/--*/-/g; s/^-//; s/-$//')"
-  [[ -z "${input}" ]] && input="goal"
-  printf '%s\n' "${input}"
+  RALPH_GOAL="${input}" run_task "branch.goal-slug"
 }
 
 # Converts a free-form segment into a safe branch segment.
 sc_branch_segment() {
   local input="${1:-}"
-  input="$(printf '%s' "${input}" | sed 's/[^A-Za-z0-9._/-]/-/g; s/--*/-/g; s#//*#/#g; s#^/##; s#/$##')"
-  [[ -z "${input}" ]] && input="none"
-  printf '%s\n' "${input}"
+  BRANCH_SEGMENT="${input}" run_task "branch.segment"
 }
 
 # Renders a branch name from template tokens.
-# Tokens:
-#   {ticket}, {goal_slug}, {session_id}, {date}
 sc_render_branch_name() {
   local template="${1:-ralph/{ticket}/{goal_slug}/{session_id}}"
   local ticket="${2:-none}"
   local goal="${3:-goal}"
   local session_id="${4:-session}"
-  local now_date
-  now_date="$(date +%Y%m%d)"
 
-  local value="${template}"
-  value="${value//\{ticket\}/$(sc_branch_segment "${ticket}")}"
-  value="${value//\{goal_slug\}/$(sc_goal_slug "${goal}")}"
-  value="${value//\{session_id\}/$(sc_branch_segment "${session_id}")}"
-  value="${value//\{date\}/${now_date}}"
-  value="$(sc_branch_segment "${value}")"
-  printf '%s\n' "${value}"
+  BRANCH_TEMPLATE="${template}" \
+  RALPH_TICKET="${ticket}" \
+  RALPH_GOAL="${goal}" \
+  RALPH_SESSION_ID="${session_id}" \
+  run_task "branch.render-name"
 }
 
 # Ensures branch name is unique by appending -N suffix when needed.
 sc_unique_branch_name() {
   local workspace="${1:-.}"
   local desired="${2:-ralph/session}"
-  local candidate="${desired}"
-  local n=2
-  while git -C "${workspace}" show-ref --verify --quiet "refs/heads/${candidate}" 2>/dev/null; do
-    candidate="${desired}-${n}"
-    n=$((n + 1))
-  done
-  printf '%s\n' "${candidate}"
+
+  RALPH_WORKSPACE="${workspace}" \
+  BRANCH_NAME="${desired}" \
+  run_task "branch.find-unique"
 }
 
 # Resolves effective backend policy.
 sc_effective_backend() {
   local workspace="${1:-.}"
   local configured="${2:-auto}"
+
+  export RALPH_WORKSPACE="${workspace}"
+
   case "${configured}" in
     git)
-      if git_is_repo "${workspace}"; then
-        printf '%s\n' "git"
+      if task_condition "git.is-repo"; then
+        echo "git"
       else
-        printf '%s\n' "filesystem-snapshot"
+        echo "filesystem-snapshot"
       fi
       ;;
     filesystem)
-      printf '%s\n' "filesystem-snapshot"
+      echo "filesystem-snapshot"
       ;;
     auto|*)
-      vcs_backend "${workspace}"
+      run_task "vcs.backend"
       ;;
   esac
 }
@@ -99,22 +97,30 @@ sc_apply_branch_policy() {
     return 2
   fi
 
+  export RALPH_WORKSPACE="${workspace}"
+  export RALPH_SESSION_ID="${session_id}"
+  export RALPH_GOAL="${goal}"
+  export RALPH_TICKET="${ticket}"
+
   local current_branch desired_branch final_branch
-  current_branch="$(git_branch "${workspace}")"
-  desired_branch="$(sc_render_branch_name "${template}" "${ticket:-none}" "${goal}" "${session_id}")"
+  current_branch="$(run_task "branch.current")"
+  desired_branch="$(BRANCH_TEMPLATE="${template}" run_task "branch.render-name")"
 
   if [[ "${current_branch}" == "${desired_branch}" ]]; then
     printf '%s\n' "${current_branch}"
     return 0
   fi
 
-  final_branch="$(sc_unique_branch_name "${workspace}" "${desired_branch}")"
-  if git -C "${workspace}" checkout -b "${final_branch}" >/dev/null 2>&1; then
+  final_branch="$(BRANCH_NAME="${desired_branch}" run_task "branch.find-unique")"
+
+  # Try create new branch
+  if BRANCH_NAME="${final_branch}" run_task "branch.checkout-new" 2>/dev/null; then
     printf '%s\n' "${final_branch}"
     return 0
   fi
 
-  if git -C "${workspace}" checkout "${desired_branch}" >/dev/null 2>&1; then
+  # Try checkout existing branch
+  if BRANCH_NAME="${desired_branch}" run_task "branch.checkout-existing" 2>/dev/null; then
     printf '%s\n' "${desired_branch}"
     return 0
   fi
@@ -131,36 +137,23 @@ sc_commit_step_if_enabled() {
   local ticket="${5:-}"
 
   sc_is_true "${enabled}" || return 0
-  git_is_repo "${workspace}" || return 0
 
-  if git -C "${workspace}" diff --quiet && git -C "${workspace}" diff --cached --quiet; then
-    return 0
-  fi
+  export RALPH_WORKSPACE="${workspace}"
+  export RALPH_STEP="${step}"
+  export RALPH_TICKET="${ticket}"
 
-  git -C "${workspace}" add -A
-
-  local msg="ralph(step ${step}): automated checkpoint"
-  [[ -n "${ticket}" ]] && msg="[${ticket}] ${msg}"
-  [[ -n "${goal}" ]] && msg="${msg} - ${goal}"
-  git -C "${workspace}" commit -m "${msg}" >/dev/null 2>&1 || true
+  # Uses task:vcs.commit-step which checks git.is-repo and git.has-changes
+  run_task "vcs.commit-step" || true
 }
 
 vcs_backend() {
-  local workspace="${1:-.}"
-  if git_is_repo "${workspace}"; then
-    echo "git"
-  else
-    echo "filesystem-snapshot"
-  fi
+  local workspace="${1:-${RALPH_WORKSPACE:-.}}"
+  RALPH_WORKSPACE="${workspace}" run_task "vcs.backend"
 }
 
 vcs_ref() {
-  local workspace="${1:-.}"
-  if git_is_repo "${workspace}"; then
-    echo "$(git_branch "${workspace}")@$(git_head_short "${workspace}")"
-  else
-    echo "n/a"
-  fi
+  local workspace="${1:-${RALPH_WORKSPACE:-.}}"
+  RALPH_WORKSPACE="${workspace}" run_task "vcs.ref"
 }
 
 vcs_status_title() {
@@ -172,13 +165,8 @@ vcs_status_title() {
 }
 
 vcs_status_short() {
-  local workspace="${1:-.}"
-  local backend
-  backend="$(vcs_backend "${workspace}")"
-  case "${backend}" in
-    git) git_status_short "${workspace}" ;;
-    *) echo "(not available for ${backend})" ;;
-  esac
+  local workspace="${1:-${RALPH_WORKSPACE:-.}}"
+  RALPH_WORKSPACE="${workspace}" run_task "git.status-short"
 }
 
 vcs_diff_title() {
@@ -190,11 +178,6 @@ vcs_diff_title() {
 }
 
 vcs_diff_stat() {
-  local workspace="${1:-.}"
-  local backend
-  backend="$(vcs_backend "${workspace}")"
-  case "${backend}" in
-    git) git_diff_stat "${workspace}" ;;
-    *) echo "(not available for ${backend})" ;;
-  esac
+  local workspace="${1:-${RALPH_WORKSPACE:-.}}"
+  RALPH_WORKSPACE="${workspace}" run_task "git.diff-stat"
 }

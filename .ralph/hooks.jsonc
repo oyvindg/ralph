@@ -1,20 +1,35 @@
 {
+  // Bootstrap runs after arg parsing but before session setup.
+  // Use for validation, environment setup, and prerequisites.
+  "bootstrap": {
+    "system": [
+      // Validate workspace exists
+      { "run": "task:validate.workspace-exists", "on_failure": "abort" },
+      // Check that an AI engine is available (unless dry-run)
+      { "run": "task:validate.engine-available", "on_failure": "abort" },
+      // Load .env file if present
+      { "run": "task:bootstrap.load-env", "allow_failure": true },
+      // Check required tools
+      { "run": "task:bootstrap.check-tools", "allow_failure": true }
+    ]
+  },
+
   // REQUIRED: Human gate select used by .ralph/hooks/human-gate.sh
   // Do not remove without disabling human_guard in profile/CLI.
   "human-gate-confirm": {
     "system": [
       {
         "select": {
-          "prompt": "{human.gate.prompt}",
+          "prompt": "lang:human.gate.prompt",
           "options": [
             {
               "code": "approve",
-              "label": "{human.gate.approve}",
+              "label": "lang:human.gate.approve",
               "run": "task:gate.approve"
             },
             {
               "code": "reject",
-              "label": "{human.gate.reject}",
+              "label": "lang:human.gate.reject",
               "run": "task:gate.reject"
             }
           ]
@@ -29,26 +44,26 @@
       {
         // Empty workspace workflow selector
         "select": {
-          "prompt": "{wizard.workflow.prompt}",
+          "prompt": "lang:wizard.workflow.prompt",
           "options": [
             {
               "code": "coding",
-              "label": "{wizard.workflow.coding}",
+              "label": "lang:wizard.workflow.coding",
               "run": "task:workflow-coding"
             },
             {
               "code": "project-management",
-              "label": "{wizard.workflow.project_management}",
+              "label": "lang:wizard.workflow.project_management",
               "run": "task:workflow-project-management"
             },
             {
               "code": "finance",
-              "label": "{wizard.workflow.finance}",
+              "label": "lang:wizard.workflow.finance",
               "run": "task:workflow-finance"
             },
             {
               "code": "non-code",
-              "label": "{wizard.workflow.non_code}",
+              "label": "lang:wizard.workflow.non_code",
               "run": "task:workflow-non-code"
             }
           ]
@@ -62,16 +77,16 @@
     "plan-overwrite-confirm": [
       {
         "select": {
-          "prompt": "{plan.overwrite.prompt}",
+          "prompt": "lang:plan.overwrite.prompt",
           "options": [
             {
               "code": "overwrite",
-              "label": "{plan.overwrite.yes}",
+              "label": "lang:plan.overwrite.yes",
               "run": "task:gate.approve"
             },
             {
               "code": "cancel",
-              "label": "{plan.overwrite.no}",
+              "label": "lang:plan.overwrite.no",
               "run": "task:gate.reject"
             }
           ]

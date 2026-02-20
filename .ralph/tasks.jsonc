@@ -41,6 +41,169 @@
       }
     },
 
+    // Validation checks (used by bootstrap hook)
+    "validate": {
+      "workspace-exists": {
+        // Abort if workspace directory doesn't exist
+        "run": "test -d \"${RALPH_WORKSPACE:-.}\" || { echo \"ERROR: Workspace not found: ${RALPH_WORKSPACE:-.}\" >&2; exit 1; }"
+      },
+      "engine-available": {
+        // Check that at least one AI engine is available (skip in dry-run)
+        "run": "test \"${RALPH_DRY_RUN:-0}\" = \"1\" || command -v codex >/dev/null 2>&1 || command -v claude >/dev/null 2>&1 || test -n \"${OPENAI_API_KEY:-}\" || test -n \"${ANTHROPIC_API_KEY:-}\" || { echo \"ERROR: No AI engine available. Install codex, claude, or set API keys.\" >&2; exit 1; }"
+      },
+      "timeout-valid": {
+        // Check timeout is a valid non-negative integer
+        "run": "test -z \"${RALPH_TIMEOUT:-}\" || test \"${RALPH_TIMEOUT}\" -ge 0 2>/dev/null || { echo \"ERROR: --timeout must be >= 0\" >&2; exit 1; }"
+      },
+      "plan-file-readable": {
+        // Check plan file exists and is readable
+        "run": "test -z \"${RALPH_PLAN_FILE:-}\" || test -r \"${RALPH_PLAN_FILE}\" || { echo \"ERROR: Plan file not readable: ${RALPH_PLAN_FILE}\" >&2; exit 1; }"
+      }
+    },
+
+    // Bootstrap tasks (environment setup, prerequisites)
+    "bootstrap": {
+      "load-env": {
+        // Load .env file from workspace if present
+        "run": "test -f \"${RALPH_WORKSPACE:-.}/.env\" && { set -a; . \"${RALPH_WORKSPACE:-.}/.env\"; set +a; } || true"
+      },
+      "check-tools": {
+        // Verify recommended tools are available
+        "run": "command -v jq >/dev/null 2>&1 || echo \"[bootstrap] Warning: jq not found, some features may be limited\" >&2; true"
+      },
+      "print-config": {
+        // Debug: print resolved configuration
+        "run": "echo \"[bootstrap] workspace=${RALPH_WORKSPACE:-?}\"; echo \"[bootstrap] engine=${RALPH_ENGINE:-auto}\"; echo \"[bootstrap] dry_run=${RALPH_DRY_RUN:-0}\""
+      }
+    },
+
+    // Utility commands
+    "util": {
+      "timestamp-iso": {
+        // Print current UTC timestamp in ISO format
+        "run": "date -u +%Y-%m-%dT%H:%M:%SZ"
+      },
+      "timestamp-compact": {
+        // Print compact timestamp for filenames
+        "run": "date -u +%Y%m%d_%H%M%S"
+      }
+    },
+
+    // Tool availability detection
+    "has": {
+      "jq": { "run": "command -v jq >/dev/null 2>&1" },
+      "rsync": { "run": "command -v rsync >/dev/null 2>&1" },
+      "curl": { "run": "command -v curl >/dev/null 2>&1" },
+      "git": { "run": "command -v git >/dev/null 2>&1" },
+      "docker": { "run": "command -v docker >/dev/null 2>&1" }
+    },
+
+    // Docker operations
+    "docker": {
+      "image-exists": {
+        // Check if ralph docker image exists
+        "run": "docker image inspect ralph >/dev/null 2>&1"
+      },
+      "build": {
+        // Build ralph docker image
+        "run": "echo 'Building ralph docker image...' && docker build -t ralph -f \"${RALPH_SCRIPT_DIR:-$(pwd)}/Dockerfile\" \"${RALPH_SCRIPT_DIR:-$(pwd)}\" && echo 'Done.'"
+      }
+    },
+
+    // Plan file operations
+    "plan": {
+      "exists": {
+        // True if plan file exists
+        "run": "test -f \"${RALPH_PLAN_FILE:-${RALPH_WORKSPACE}/.ralph/plans/plan.json}\""
+      },
+      "has-steps": {
+        // True if plan has .steps array
+        "run": "jq -e '.steps | type == \"array\"' \"${RALPH_PLAN_FILE:-${RALPH_WORKSPACE}/.ralph/plans/plan.json}\" >/dev/null 2>&1"
+      },
+      "has-pending": {
+        // True if plan has pending steps
+        "run": "jq -e '[.steps[] | select(.status == \"pending\")] | length > 0' \"${RALPH_PLAN_FILE:-${RALPH_WORKSPACE}/.ralph/plans/plan.json}\" >/dev/null 2>&1"
+      },
+      "step-count": {
+        // Print number of steps
+        "run": "jq -r '.steps | length' \"${RALPH_PLAN_FILE:-${RALPH_WORKSPACE}/.ralph/plans/plan.json}\" 2>/dev/null || echo 0"
+      },
+      "pending-count": {
+        // Print number of pending steps
+        "run": "jq -r '[.steps[] | select(.status == \"pending\")] | length' \"${RALPH_PLAN_FILE:-${RALPH_WORKSPACE}/.ralph/plans/plan.json}\" 2>/dev/null || echo 0"
+      }
+    },
+
+    // Checkpoint operations
+    "checkpoint": {
+      "copy-rsync": {
+        // Copy workspace using rsync (preferred)
+        "when": "task:has.rsync",
+        "run": "rsync -a --delete --exclude '.git/' --exclude '.ralph/sessions/' --exclude '.ralph/checkpoints/' \"${RALPH_WORKSPACE}/\" \"${CHECKPOINT_DEST}/\""
+      },
+      "copy-tar": {
+        // Copy workspace using tar (fallback)
+        "run": "(cd \"${RALPH_WORKSPACE}\" && tar --exclude='.git' --exclude='.ralph/sessions' --exclude='.ralph/checkpoints' -cf - .) | (cd \"${CHECKPOINT_DEST}\" && tar -xf -)"
+      },
+      "write-metadata": {
+        // Write checkpoint metadata file
+        "run": "{ echo \"created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)\"; echo \"label=${CHECKPOINT_LABEL:-unknown}\"; echo \"session_id=${RALPH_SESSION_ID:-session}\"; echo \"workspace=${RALPH_WORKSPACE:-.}\"; echo \"step=${RALPH_STEP:-}\"; echo \"plan_file=${RALPH_PLAN_FILE:-}\"; echo \"ticket=${RALPH_TICKET:-}\"; } > \"${CHECKPOINT_DEST}/.checkpoint.meta\""
+      }
+    },
+
+    // Branch name utilities
+    "branch": {
+      "goal-slug": {
+        // Convert goal to branch-safe slug
+        "run": "printf '%s' \"${RALPH_GOAL:-goal}\" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g; s/--*/-/g; s/^-//; s/-$//'"
+      },
+      "segment": {
+        // Convert free-form text to safe branch segment
+        "run": "printf '%s' \"${BRANCH_SEGMENT:-none}\" | sed 's/[^A-Za-z0-9._/-]/-/g; s/--*/-/g; s#//*#/#g; s#^/##; s#/$##' | { read -r x; echo \"${x:-none}\"; }"
+      },
+      "render-name": {
+        // Render branch name from template with tokens: {ticket} {goal_slug} {session_id} {date}
+        "run": "echo \"${BRANCH_TEMPLATE:-ralph/{ticket}/{goal_slug}/{session_id}}\" | sed \"s/{ticket}/$(echo \"${RALPH_TICKET:-none}\" | sed 's/[^A-Za-z0-9._/-]/-/g')/g; s/{goal_slug}/$(echo \"${RALPH_GOAL:-goal}\" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g')/g; s/{session_id}/$(echo \"${RALPH_SESSION_ID:-session}\" | sed 's/[^A-Za-z0-9._/-]/-/g')/g; s/{date}/$(date +%Y%m%d)/g\""
+      },
+      "current": {
+        // Print current branch name
+        "run": "task:git.branch"
+      },
+      "checkout-new": {
+        // Create and checkout new branch
+        "run": "git -C \"${RALPH_WORKSPACE:-.}\" checkout -b \"${BRANCH_NAME}\" >/dev/null 2>&1"
+      },
+      "checkout-existing": {
+        // Checkout existing branch
+        "run": "git -C \"${RALPH_WORKSPACE:-.}\" checkout \"${BRANCH_NAME}\" >/dev/null 2>&1"
+      },
+      "exists": {
+        // Check if branch exists
+        "run": "git -C \"${RALPH_WORKSPACE:-.}\" show-ref --verify --quiet \"refs/heads/${BRANCH_NAME}\" 2>/dev/null"
+      },
+      "find-unique": {
+        // Find unique branch name by appending -N if needed (max 99 attempts)
+        "run": "name=\"${BRANCH_NAME}\"; n=2; while git -C \"${RALPH_WORKSPACE:-.}\" show-ref --verify --quiet \"refs/heads/${name}\" 2>/dev/null && [ $n -lt 100 ]; do name=\"${BRANCH_NAME}-${n}\"; n=$((n+1)); done; echo \"${name}\""
+      }
+    },
+
+    // VCS agnostic operations
+    "vcs": {
+      "backend": {
+        // Print detected VCS backend (git or filesystem-snapshot)
+        "run": "task:git.is-repo && echo 'git' || echo 'filesystem-snapshot'"
+      },
+      "ref": {
+        // Print current VCS reference (branch@commit or n/a)
+        "run": "task:git.is-repo && echo \"$(task:git.branch)@$(task:git.head-short)\" || echo 'n/a'"
+      },
+      "commit-step": {
+        // Create step commit if changes exist
+        "when": "task:git.is-repo && task:git.has-changes",
+        "run": "git -C \"${RALPH_WORKSPACE}\" add -A && git -C \"${RALPH_WORKSPACE}\" commit -m \"ralph(step ${RALPH_STEP:-?}): automated checkpoint${RALPH_TICKET:+ [${RALPH_TICKET}]}\" >/dev/null 2>&1 || true"
+      }
+    },
+
     // Git repository checks and helpers
     "git": {
       "is-repo": {

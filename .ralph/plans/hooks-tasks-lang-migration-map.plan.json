@@ -9,8 +9,8 @@
       "status": "completed",
       "commit": null,
       "created_at": "2026-02-20T01:00:04Z",
-      "updated_at": "2026-02-20T16:14:25Z",
-      "completed_at": "2026-02-20T16:14:25Z"
+      "updated_at": "2026-02-20T21:38:50Z",
+      "completed_at": "2026-02-20T21:38:50Z"
     },
     {
       "id": "step-2",
@@ -19,8 +19,8 @@
       "status": "completed",
       "commit": null,
       "created_at": "2026-02-20T01:00:04Z",
-      "updated_at": "2026-02-20T16:14:26Z",
-      "completed_at": "2026-02-20T16:14:26Z"
+      "updated_at": "2026-02-20T21:38:51Z",
+      "completed_at": "2026-02-20T21:38:51Z"
     },
     {
       "id": "step-3",
@@ -29,103 +29,103 @@
       "status": "completed",
       "commit": null,
       "created_at": "2026-02-20T01:00:04Z",
-      "updated_at": "2026-02-20T16:14:26Z",
-      "completed_at": "2026-02-20T16:14:26Z"
+      "updated_at": "2026-02-20T21:38:52Z",
+      "completed_at": "2026-02-20T21:38:52Z"
     },
     {
       "id": "step-4",
       "description": "Wire `issues-context`, `planning-generate`, `source-control-policy`, and `checkpoint-pre-session` into `before-session.system` in hooks config with explicit `when` conditions.",
       "acceptance": "Hook engine dry-run shows the new before-session task order and correctly skips/runs checkpoint based on `RALPH_CHECKPOINT_ENABLED` and `RALPH_DRY_RUN`.",
-      "status": "pending",
+      "status": "completed",
       "commit": null,
       "created_at": "2026-02-20T01:00:04Z",
-      "updated_at": "2026-02-20T16:14:23Z",
-      "completed_at": null
+      "updated_at": "2026-02-20T21:38:53Z",
+      "completed_at": "2026-02-20T21:38:53Z"
     },
     {
       "id": "step-5",
       "description": "Wire `testing-run` and step-scoped `human-gate` into `quality-gate.after-system` using scope-based conditions.",
       "acceptance": "Quality-gate dry-run shows `testing-run` and `human-gate` execution decisions matching scope `step`/`both` rules.",
-      "status": "pending",
+      "status": "completed",
       "commit": null,
       "created_at": "2026-02-20T01:00:04Z",
-      "updated_at": "2026-02-20T16:14:23Z",
-      "completed_at": null
+      "updated_at": "2026-02-20T21:38:53Z",
+      "completed_at": "2026-02-20T21:38:53Z"
     },
     {
       "id": "step-6",
       "description": "Wire `metrics-step-summary` into `after-step.after-system` and remove equivalent direct orchestration call sites from shell where replaced.",
       "acceptance": "After-step run logs metrics through the task path, and no duplicate metric logging occurs.",
-      "status": "pending",
+      "status": "completed",
       "commit": null,
       "created_at": "2026-02-20T01:00:04Z",
-      "updated_at": "2026-02-20T16:14:23Z",
-      "completed_at": null
+      "updated_at": "2026-02-20T21:38:54Z",
+      "completed_at": "2026-02-20T21:38:54Z"
     },
     {
       "id": "step-7",
       "description": "Move newly identified user-facing strings to `.ralph/lang/no.json`, `.ralph/lang/en.json`, and `.ralph/lang/sv.json` using stable language keys.",
       "acceptance": "Language lookup tests confirm all new keys resolve in `no`, `en`, and `sv` with no missing-key warnings during run.",
-      "status": "pending",
+      "status": "completed",
       "commit": null,
       "created_at": "2026-02-20T01:00:04Z",
-      "updated_at": "2026-02-20T16:14:23Z",
-      "completed_at": null
+      "updated_at": "2026-02-20T21:38:55Z",
+      "completed_at": "2026-02-20T21:38:55Z"
     },
     {
       "id": "step-8",
       "description": "Refactor `before-session.sh` orchestration to keep only setup and remaining non-declarative flow (`run_plan_approval_gate` partial shell logic).",
       "acceptance": "Shell script no longer performs migrated orchestration steps directly, and functional behavior remains unchanged in integration run.",
-      "status": "pending",
+      "status": "completed",
       "commit": null,
       "created_at": "2026-02-20T01:00:04Z",
-      "updated_at": "2026-02-20T16:14:23Z",
-      "completed_at": null
+      "updated_at": "2026-02-20T21:38:56Z",
+      "completed_at": "2026-02-20T21:38:56Z"
     },
     {
       "id": "step-9",
       "description": "Introduce focused tests for migrated declarative flow: task resolution, hook phase ordering, conditional gates, and language-key presence.",
       "acceptance": "New/updated tests fail without migration changes and pass with migration changes.",
-      "status": "pending",
+      "status": "completed",
       "commit": null,
       "created_at": "2026-02-20T01:00:04Z",
-      "updated_at": "2026-02-20T16:14:23Z",
-      "completed_at": null
+      "updated_at": "2026-02-20T21:38:56Z",
+      "completed_at": "2026-02-20T21:38:56Z"
     },
     {
       "id": "step-10",
       "description": "Run full regression suite and compare behavior against baseline logs to verify no unintended runtime regressions.",
       "acceptance": "`tests/run.sh` passes and baseline-vs-new comparison shows only expected orchestration-path differences.",
-      "status": "pending",
+      "status": "completed",
       "commit": null,
       "created_at": "2026-02-20T01:00:04Z",
-      "updated_at": "2026-02-20T16:14:23Z",
-      "completed_at": null
+      "updated_at": "2026-02-20T21:38:57Z",
+      "completed_at": "2026-02-20T21:38:57Z"
     },
     {
       "id": "step-11",
       "description": "Document migration mapping and operational usage updates in repo docs (tasks/hook phases/lang keys and fallback behavior).",
       "acceptance": "Documentation references current files and IDs, and a maintainer can follow steps to locate each migrated responsibility.",
-      "status": "pending",
+      "status": "completed",
       "commit": null,
       "created_at": "2026-02-20T01:00:04Z",
-      "updated_at": "2026-02-20T16:14:23Z",
-      "completed_at": null
+      "updated_at": "2026-02-20T21:38:58Z",
+      "completed_at": "2026-02-20T21:38:58Z"
     },
     {
       "id": "step-12",
       "description": "Finalize by validating that human-check behavior is controlled by hooks config and not hardcoded fallback shell branches.",
       "acceptance": "Review checklist passes: human checks are config-driven, runtime placement rules are respected, and all migration-related tests are green.",
-      "status": "pending",
+      "status": "completed",
       "commit": null,
       "created_at": "2026-02-20T01:00:04Z",
-      "updated_at": "2026-02-20T16:14:23Z",
-      "completed_at": null
+      "updated_at": "2026-02-20T21:38:59Z",
+      "completed_at": "2026-02-20T21:38:59Z"
     }
   ],
   "generated_at": "2026-02-20T01:00:04Z",
-  "updated_at": "2026-02-20T16:14:26Z",
+  "updated_at": "2026-02-20T21:38:59Z",
   "approved_by": "oyvindg",
-  "approved_at": "2026-02-20T16:14:24Z",
+  "approved_at": "2026-02-20T21:38:50Z",
   "approval_source": "interactive"
 }

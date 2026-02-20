@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # Workspace checkpoint helpers for non-git rollback safety.
+# Delegates to task:checkpoint.* and task:has.* from tasks.jsonc.
 set -euo pipefail
+
+CHECKPOINT_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Load parser for run_task/task_condition helpers
+if [[ -f "${CHECKPOINT_LIB_DIR}/core/parser.sh" ]]; then
+  # shellcheck disable=SC1091
+  source "${CHECKPOINT_LIB_DIR}/core/parser.sh"
+fi
 
 # Copy workspace into checkpoint directory while excluding volatile state.
 checkpoint_copy_workspace() {
@@ -9,18 +18,14 @@ checkpoint_copy_workspace() {
 
   mkdir -p "${destination}"
 
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -a --delete \
-      --exclude '.git/' \
-      --exclude '.ralph/sessions/' \
-      --exclude '.ralph/checkpoints/' \
-      "${workspace}/" "${destination}/"
-    return 0
-  fi
+  export RALPH_WORKSPACE="${workspace}"
+  export CHECKPOINT_DEST="${destination}"
 
-  # Fallback when rsync is unavailable.
-  (cd "${workspace}" && tar --exclude='.git' --exclude='.ralph/sessions' --exclude='.ralph/checkpoints' -cf - .) | \
-    (cd "${destination}" && tar -xf -)
+  if task_condition "has.rsync"; then
+    run_task "checkpoint.copy-rsync"
+  else
+    run_task "checkpoint.copy-tar"
+  fi
 }
 
 # Write simple metadata beside each checkpoint snapshot.
@@ -33,19 +38,15 @@ checkpoint_write_metadata() {
   local plan_file="${6:-}"
   local ticket="${7:-}"
 
-  local meta_file="${destination}/.checkpoint.meta"
-  {
-    echo "created_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    echo "label=${label}"
-    echo "session_id=${session_id}"
-    echo "workspace=${workspace}"
-    echo "step=${step}"
-    echo "plan_file=${plan_file}"
-    echo "ticket=${ticket}"
-    if [[ -n "${plan_file}" ]] && [[ -f "${plan_file}" ]] && command -v sha256sum >/dev/null 2>&1; then
-      echo "plan_sha256=$(sha256sum "${plan_file}" | awk '{print $1}')"
-    fi
-  } > "${meta_file}"
+  export CHECKPOINT_DEST="${destination}"
+  export CHECKPOINT_LABEL="${label}"
+  export RALPH_WORKSPACE="${workspace}"
+  export RALPH_SESSION_ID="${session_id}"
+  export RALPH_STEP="${step}"
+  export RALPH_PLAN_FILE="${plan_file}"
+  export RALPH_TICKET="${ticket}"
+
+  run_task "checkpoint.write-metadata"
 }
 
 # Create one checkpoint folder under current session.
