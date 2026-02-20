@@ -269,7 +269,14 @@ json_hook_when_task_command() {
   normalized_ref="$(json_hook_normalize_task_ref "${task_ref}")"
   [[ -n "${normalized_ref}" ]] || return 1
   payload="$(expand_json_hook_task "{\"task\":\"${normalized_ref}\"}" "${tasks_file}")"
-  printf '%s' "${payload}" | jq -r '.run // .cmd // empty' 2>/dev/null || true
+  local cmd=""
+  cmd="$(printf '%s' "${payload}" | jq -r '.run // .cmd // empty' 2>/dev/null || true)"
+  if [[ -n "${cmd}" && -n "${tasks_file}" ]]; then
+    local expanded
+    expanded="$(json_hook_expand_run_placeholders "${cmd}" "${tasks_file}" || true)"
+    [[ -n "${expanded}" ]] && cmd="${expanded}"
+  fi
+  printf '%s' "${cmd}"
 }
 
 # Expands {task.ref} placeholders in when-expression to runnable shell clauses.

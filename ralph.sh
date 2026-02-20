@@ -116,16 +116,39 @@ init_runtime_defaults() {
   PROFILE_LANGUAGE=""
 }
 
-# Loads version helpers when available.
-bootstrap_version_lib() {
-  if [[ -f "${SCRIPT_DIR}/.ralph/lib/version.sh" ]]; then
-    # shellcheck disable=SC1091
-    source "${SCRIPT_DIR}/.ralph/lib/version.sh"
-  fi
+version_task_command() {
+  # Resolves version.print task command from tasks.jsonc.
+  local saved_root="${ROOT}"
+  local tasks_file=""
+  local cmd=""
+
+  bootstrap_config_lib
+  ROOT="${SCRIPT_DIR}"
+  tasks_file="$(resolve_tasks_json_path || true)"
+  ROOT="${saved_root}"
+
+  [[ -n "${tasks_file}" && -f "${tasks_file}" ]] || return 1
+  [[ -f "${SCRIPT_DIR}/.ralph/lib/core/hooks-parser.sh" ]] || return 1
+  # shellcheck disable=SC1091
+  source "${SCRIPT_DIR}/.ralph/lib/core/hooks-parser.sh"
+
+  cmd="$(json_hook_when_task_command "version.print" "${tasks_file}")"
+  [[ -n "${cmd}" ]] || return 1
+  printf '%s\n' "${cmd}"
+}
+
+run_version_task() {
+  # Runs version.print task with repo_root bound to script directory.
+  local cmd
+  cmd="$(version_task_command || true)"
+  [[ -n "${cmd}" ]] || return 1
+  repo_root="${SCRIPT_DIR}" \
+  RALPH_PROJECT_DIR="${SCRIPT_DIR}/.ralph" \
+  RALPH_WORKSPACE="${SCRIPT_DIR}" \
+  bash -lc "${cmd}"
 }
 
 init_runtime_defaults
-bootstrap_version_lib
 
 # =============================================================================
 # Docker Functions
@@ -662,8 +685,8 @@ parse_args() {
       --setup-target) SETUP_TARGET="${2:-}"; shift 2 ;;
       --test) TEST_MODE=1; shift ;;
       --version)
-        if command -v ralph_print_version >/dev/null 2>&1; then
-          ralph_print_version "${SCRIPT_DIR}"
+        if run_version_task; then
+          : "version.print task executed"
         else
           echo "ralph ${RALPH_VERSION}"
         fi

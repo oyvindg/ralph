@@ -23,11 +23,22 @@ cmd="$(json_hook_when_task_command "version.git-rev-short" "${TASKS_FILE}")"
 assert_ne "" "${cmd}" "version.git-rev-short should resolve to a command"
 
 expected_rev="$(git -C "${TMP_REPO}" rev-parse --short HEAD)"
-actual_rev="$(repo_root="${TMP_REPO}" bash -lc "${cmd}")"
+actual_rev="$(
+  repo_root="${TMP_REPO}" \
+  RALPH_PROJECT_DIR="${ROOT_DIR}/.ralph" \
+  RALPH_WORKSPACE="${ROOT_DIR}" \
+  bash -lc "${cmd}"
+)"
 assert_eq "${expected_rev}" "${actual_rev}" "version.git-rev-short should match git rev"
 
 cmd="$(json_hook_when_task_command "version.print" "${TASKS_FILE}")"
 assert_ne "" "${cmd}" "version.print should resolve to a command"
 
-output="$(repo_root="${TMP_REPO}" RALPH_VERSION="9.9.9" bash -lc "${cmd}")"
+output="$(
+  repo_root="${TMP_REPO}" \
+  RALPH_VERSION="9.9.9" \
+  RALPH_PROJECT_DIR="${ROOT_DIR}/.ralph" \
+  RALPH_WORKSPACE="${ROOT_DIR}" \
+  bash -lc "${cmd}"
+)"
 assert_eq "ralph 9.9.9 (${expected_rev})" "${output}" "version.print should render version and rev"

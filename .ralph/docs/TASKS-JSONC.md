@@ -2,6 +2,46 @@
 
 Reusable task and condition definitions for hooks.jsonc.
 
+## Best Practice
+
+**Define commands in tasks.jsonc, not in hooks.jsonc.**
+
+```jsonc
+// tasks.jsonc - commands live here
+{
+  "tasks": {
+    "test": { "run": "npm test" },
+    "lint": { "run": "npm run lint" },
+    "deploy": { "run": "./deploy.sh" }
+  }
+}
+
+// hooks.jsonc - only references and properties
+{
+  "quality-gate": {
+    "system": [
+      { "run": "task:lint", "allow_failure": true },
+      { "run": "task:test" }
+    ]
+  }
+}
+```
+
+Why:
+- **Single source of truth** - commands defined once, reused everywhere
+- **Easier maintenance** - change command in one place
+- **Cleaner separation** - tasks.jsonc = what, hooks.jsonc = when
+- **Testable** - tasks can be run standalone via `task:name`
+
+Inline commands in hooks.jsonc are supported but discouraged:
+```jsonc
+// Works, but avoid this
+{ "run": "npm test" }
+
+// Prefer this
+{ "run": "task:test" }
+```
+
 ## File Location
 
 Resolution order (first match wins):

@@ -42,8 +42,17 @@
       "git-rev-short": {
         "run": "git -C \"${repo_root:-.}\" rev-parse --short HEAD 2>/dev/null || true"
       },
+      "has-git": {
+        "run": "git -C \"${repo_root:-.}\" rev-parse --short HEAD >/dev/null 2>&1"
+      },
+      "print-with-commit": {
+        "run": "echo \"ralph ${RALPH_VERSION} (commit: $(git -C \"${repo_root:-.}\" rev-parse --short HEAD))\""
+      },
+      "print-simple": {
+        "run": "echo \"ralph ${RALPH_VERSION}\""
+      },
       "print": {
-        "run": "git_rev=\"$(git -C \"${repo_root:-.}\" rev-parse --short HEAD 2>/dev/null || true)\"; if [[ -n \"${git_rev}\" ]]; then echo \"ralph ${RALPH_VERSION} (${git_rev})\"; else echo \"ralph ${RALPH_VERSION}\"; fi"
+        "run": "task:version.has-git && task:version.print-with-commit || task:version.print-simple"
       }
     }
   }
