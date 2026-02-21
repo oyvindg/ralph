@@ -251,9 +251,21 @@ run_json_hook_command_entry() {
   set -e
   if [[ "${rc}" -ne 0 ]]; then
     echo "${C_YELLOW}[hooks.json]${C_RESET} ${event}: command failed (${rc})"
-    # on_failure: "abort" takes precedence
-    if [[ "${on_failure}" == "abort" ]]; then
-      return "${rc}"
+    if [[ -n "${on_failure}" ]]; then
+      if [[ "${on_failure}" == "abort" ]]; then
+        return "${rc}"
+      fi
+      echo "${C_YELLOW}[hooks.json]${C_RESET} ${event}: running on_failure handler"
+      set +e
+      (
+        cd "${cwd_abs}"
+        export RALPH_STEP="${step}"
+        export RALPH_STEP_EXIT_CODE="${step_exit_code}"
+        bash -lc "${on_failure}"
+      )
+      local failure_rc=$?
+      set -e
+      return "${failure_rc}"
     fi
     if [[ "${allow_failure}" != "1" && "${stop_on_error}" == "true" ]]; then
       return "${rc}"
